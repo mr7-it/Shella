@@ -1,0 +1,29 @@
+[package]
+name = "shella"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Sistem neuromorfik Rust dengan jaringan LIF, pembelajaran, dan SDK modular"
+
+[lib]
+name = "shella"
+path = "src/lib.rs"
+
+[[bin]]
+name = "shella"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[[bench]]
+name = "learning"
+harness = false
+
+[[bench]]
+name = "system"
+harness = false
+
+[lints.rust]
+unsafe_code = "forbid"
