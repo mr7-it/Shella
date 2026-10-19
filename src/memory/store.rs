@@ -9,6 +9,7 @@ use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},
     path::{Path, PathBuf},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 /// Database file-backed dengan satu penulis lintas proses.
@@ -50,11 +51,13 @@ impl MemoryStore {
 
         if path.exists() {
             let data = persistence::read_store(&path)?;
-            Ok(Self {
+            let mut store = Self {
                 path,
                 data,
                 _lock_file: lock_file,
-            })
+            };
+            store.purge_expired()?;
+            Ok(store)
         } else {
             let data = StoreData {
                 format_version: FORMAT_VERSION,
@@ -77,9 +80,28 @@ impl MemoryStore {
         value: Value,
         tags: &[String],
     ) -> Result<RecordId, SimError> {
+        self.put_with_embedding(key, value, tags, None)
+    }
+
+    /// Menyimpan record dengan embedding numerik yang akan dipakai retrieval semantik.
+    pub fn put_with_embedding(
+        &mut self,
+        key: impl Into<String>,
+        value: Value,
+        tags: &[String],
+        embedding: Option<&[f32]>,
+    ) -> Result<RecordId, SimError> {
         let key = key.into();
         validate_field("key", &key)?;
         let tags = persistence::normalize_tags(tags)?;
+        if let Some(embedding) = embedding {
+            if embedding.is_empty() || embedding.iter().any(|value| !value.is_finite()) {
+                return Err(SimError::InvalidInput {
+                    parameter: "embedding",
+                    reason: "harus non-kosong dan semua nilai finite",
+                });
+            }
+        }
         let mut next = self.data.clone();
         let id = if let Some(existing) = next.records.get(&key) {
             existing.id.clone()
@@ -97,10 +119,57 @@ impl MemoryStore {
                 key,
                 value,
                 tags,
+                embedding: embedding.map(ToOwned::to_owned),
+                expires_at_unix: None,
             },
         );
         self.commit(next)?;
         Ok(id)
+    }
+
+    /// Menyimpan record dengan TTL absolut dalam detik Unix.
+    pub fn put_with_ttl(
+        &mut self,
+        key: impl Into<String>,
+        value: Value,
+        tags: &[String],
+        ttl: Duration,
+    ) -> Result<RecordId, SimError> {
+        let key = key.into();
+        let id = self.put(key.clone(), value, tags)?;
+        let expires_at_unix =
+            now_unix()
+                .checked_add(ttl.as_secs())
+                .ok_or(SimError::CounterOverflow {
+                    counter: "TTL memori",
+                })?;
+        let mut next = self.data.clone();
+        if let Some(record) = next.records.get_mut(&key) {
+            record.expires_at_unix = Some(expires_at_unix.max(now_unix() + 1));
+        }
+        self.commit(next)?;
+        Ok(id)
+    }
+
+    /// Menghapus record yang telah melewati TTL dan mengembalikan jumlah penghapusan.
+    pub fn purge_expired(&mut self) -> Result<usize, SimError> {
+        let now = now_unix();
+        let expired = self
+            .data
+            .records
+            .iter()
+            .filter(|(_, record)| record.is_expired(now))
+            .map(|(key, _)| key.clone())
+            .collect::<Vec<_>>();
+        if expired.is_empty() {
+            return Ok(0);
+        }
+        let mut next = self.data.clone();
+        for key in &expired {
+            next.records.remove(key);
+        }
+        self.commit(next)?;
+        Ok(expired.len())
     }
 
     /// Menghapus record; nilai kembalian menandakan apakah key ditemukan.
@@ -146,4 +215,11 @@ fn normalize_path(path: &Path) -> Result<PathBuf, SimError> {
         operation: "normalisasi path memori",
         kind: error.kind(),
     })
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }

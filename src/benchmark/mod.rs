@@ -5,6 +5,7 @@ mod experiments;
 mod generalization;
 mod interference;
 mod long_term;
+mod self_learning;
 mod statistics;
 
 pub use continual::{ContinualBenchmarkConfig, ContinualBenchmarkResult, ContinualSeedResult};
@@ -21,6 +22,10 @@ pub use interference::{
     InterferenceBenchmarkConfig, InterferenceBenchmarkResult, InterferenceSeedResult,
 };
 pub use long_term::{
-    LongTermLearningBenchmarkConfig, LongTermLearningBenchmarkResult,
-    LongTermLearningNoiseResult, LongTermLearningRunResult, LongTermLearningTaskMetrics,
+    LongTermLearningBenchmarkConfig, LongTermLearningBenchmarkResult, LongTermLearningNoiseResult,
+    LongTermLearningRunResult, LongTermLearningTaskMetrics,
+};
+pub use self_learning::{
+    IrisSample, SelfEvaluation, StratifiedFold, StratifiedSplit, TrainScaler, evaluate_predictions,
+    noise, stratified_folds, stratified_split,
 };

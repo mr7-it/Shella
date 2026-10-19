@@ -26,15 +26,17 @@ pub use benchmark::{
     ContinualReplayNoiseResult, ContinualReplayRunResult, ContinualReplayTaskMetrics,
     ContinualReplayValidation, ContinualSeedResult, GeneralizationBenchmarkConfig,
     GeneralizationBenchmarkResult, GeneralizationNoiseResult, GeneralizationRunResult,
-    InterferenceBenchmarkConfig, InterferenceBenchmarkResult, InterferenceSeedResult,
-    LongTermLearningBenchmarkConfig, LongTermLearningBenchmarkResult,
-    LongTermLearningNoiseResult, LongTermLearningRunResult, LongTermLearningTaskMetrics,
+    InterferenceBenchmarkConfig, InterferenceBenchmarkResult, InterferenceSeedResult, IrisSample,
+    LongTermLearningBenchmarkConfig, LongTermLearningBenchmarkResult, LongTermLearningNoiseResult,
+    LongTermLearningRunResult, LongTermLearningTaskMetrics, SelfEvaluation, StratifiedFold,
+    StratifiedSplit, TrainScaler, evaluate_predictions, noise, stratified_folds, stratified_split,
 };
 pub use checkpoint::{Checkpoint, RestoredState};
 pub use config::LifConfig;
 pub use decision::{
-    AbstentionReason, Candidate, Decision, DecisionEvaluator, DecisionMetrics, DecisionPolicy,
-    FeatureContribution,
+    AbstentionReason, CalibrationEvaluator, CalibrationMetrics, Candidate, Decision,
+    DecisionEvaluator, DecisionMetrics, DecisionPolicy, FeatureContribution, IsotonicCalibrator,
+    PlattCalibrator,
 };
 pub use error::SimError;
 pub use evaluator::{RewardEvaluation, RewardEvaluator, RewardEvaluatorConfig, RewardMetrics};
@@ -43,7 +45,7 @@ pub use learning::{
     ForgettingReport, LearningMemory, MemoryConflict, MemoryFeedbackWrite, MemoryInference,
     MemoryRecall, ReplayReport, RewardModulatedStdpConfig, StdpConfig,
 };
-pub use memory::{MemoryRecord, MemoryStore, RecordId};
+pub use memory::{MemoryRecord, MemoryStore, RecordId, SecureMemoryStore, TextEmbedding};
 pub use network::{LifNetwork, NetworkStep, Synapse};
 pub use neuron::lif::{LifNeuron, StepOutcome};
 pub use runtime::{LifRuntime, SimulationClock};

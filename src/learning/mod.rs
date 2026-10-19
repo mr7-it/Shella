@@ -6,8 +6,8 @@ mod stdp;
 
 pub(crate) use eligibility_trace::StdpTrace;
 pub use long_term::{
-	ForgettingReport, LearningMemory, MemoryConflict, MemoryFeedbackWrite, MemoryInference,
-	MemoryRecall, ReplayReport,
+    ForgettingReport, LearningMemory, MemoryConflict, MemoryFeedbackWrite, MemoryInference,
+    MemoryRecall, ReplayReport,
 };
 pub use reward_modulated::RewardModulatedStdpConfig;
 pub use stdp::StdpConfig;

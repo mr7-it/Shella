@@ -1,5 +1,5 @@
 use shella::{
-    LifConfig, LifNetwork, LearningMemory, RewardModulatedStdpConfig, StdpConfig, Synapse,
+    LearningMemory, LifConfig, LifNetwork, RewardModulatedStdpConfig, StdpConfig, Synapse,
 };
 use std::{
     fs,
@@ -102,9 +102,27 @@ fn retrieval_task_filter_memisahkan_association_yang_bertentangan() {
         .record_feedback("task-b", &features, Some(1), Some(1))
         .expect("asosiasi B disimpan");
 
-    assert_eq!(memory.find_conflicts(&features, Some(1), 0.95).unwrap().len(), 1);
-    assert_eq!(memory.recall_task_similar("task-a", &features, 4).unwrap().len(), 1);
-    assert_eq!(memory.recall_task_similar("task-b", &features, 4).unwrap().len(), 1);
+    assert_eq!(
+        memory
+            .find_conflicts(&features, Some(1), 0.95)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        memory
+            .recall_task_similar("task-a", &features, 4)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        memory
+            .recall_task_similar("task-b", &features, 4)
+            .unwrap()
+            .len(),
+        1
+    );
 
     let mut task_a_network = network(4);
     let task_a = memory
@@ -191,12 +209,16 @@ fn pelupaan_decay_menghapus_yang_irrelevan_dan_melindungi_memori_terkonsolidasi(
 fn simpanan_memori_menolak_fitur_non_finite_dan_feedback_invalid() {
     let path = memory_path();
     let mut memory = LearningMemory::open(&path).expect("store dibuka");
-    assert!(memory
-        .record_feedback("task", &[f64::NAN], Some(0), Some(0))
-        .is_err());
-    assert!(memory
-        .record_with_feedback("task", &[1.0], Some(0), 2.0, 1.0)
-        .is_err());
+    assert!(
+        memory
+            .record_feedback("task", &[f64::NAN], Some(0), Some(0))
+            .is_err()
+    );
+    assert!(
+        memory
+            .record_with_feedback("task", &[1.0], Some(0), 2.0, 1.0)
+            .is_err()
+    );
     assert_eq!(memory.len(), 0);
     drop(memory);
     cleanup(&path);

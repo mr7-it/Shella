@@ -1,11 +1,37 @@
-# Memori persisten
+# Memori persisten, embedding, dan secure storage M10
 
-`MemoryStore::open(path)` membuka file yang ada atau membuat database kosong. `put(key, serde_json::Value, tags)` melakukan insert/upsert: key unik dan ID `rec-…` tetap sama saat key diperbarui. Retrieval berada pada `memory/retrieval.rs`: `get`, `get_by_id`, `search_prefix`, `search_tag`, `records`, `len`, dan `is_empty`. `delete` eksplisit. Tag dinormalisasi unik/terurut, hasil pencarian deterministik.
+## MemoryStore backward-compatible
 
-`memory/record.rs` memuat schema catatan; `memory/store.rs` menangani operasi mutasi; `memory/persistence.rs` memvalidasi schema, checksum, ukuran, dan menulis snapshot. Mutasi menyiapkan snapshot kandidat, menserialisasi, menulis file sementara eksklusif, sinkronisasi isi, lalu `rename`; state dalam memori diubah sesudah persist berhasil. Sinkronisasi direktori setelah rename best-effort.
+`MemoryStore::open(path)` tetap menyediakan format JSON v1, checksum FNV-1a, atomic rename, dan mode single-writer untuk kompatibilitas data lama. `put_with_embedding` menyimpan vektor embedding numerik dan `search_embedding` mengurutkan record berdasarkan cosine similarity. `put_with_ttl` menyimpan TTL absolut; record expired dibersihkan saat open dan dapat dibersihkan eksplisit melalui `purge_expired`.
 
-`MemoryStore::open` mengambil advisory exclusive lock pada sidecar `<path>.lock` sebelum membaca atau membuat database. Path dinormalisasi sehingga alias relatif menuju file yang sama memakai lock yang sama. Hanya satu instance/proses dapat memegang lock; pembukaan berikutnya gagal dengan `SimError::Io { operation: "kunci memori", kind: WouldBlock }`. Lock dilepas otomatis saat `MemoryStore` ditutup atau proses berakhir. File sidecar sengaja tidak dihapus otomatis; jangan menghapusnya saat ada proses yang mungkin masih membuka store, karena lock OS melekat pada file yang terbuka.
+`TextEmbedding::from_text(text, dimensions)` membuat embedding hashing deterministik dari token dan character 3-gram. `LearningMemory::record_text_feedback` dan `recall_text_similar` memakai embedding 256 dimensi ini. Representasi ini adalah semantic-like lexical retrieval yang reproducible; bukan embedding neural, model bahasa, atau bukti pemahaman semantik.
 
-Format v1 menggunakan JSON dan checksum FNV-1a; maximum file 64 MiB, key/tag masing-masing dibatasi 16 KiB. File sementara Unix dibuat dengan mode `0600`. Error terstruktur mencakup `CorruptData { subsystem: "memori", .. }`, `UnsupportedDataVersion`, `SerializationFailed`, `Io`, validasi input, dan allocation/error lain yang relevan.
+## SecureMemoryStore
 
-Penyimpanan menegakkan satu penulis lintas proses per path melalui advisory lock. Lock ini bukan transaksi multi-writer dan bergantung pada dukungan locking filesystem; jangan menghapus atau mengganti sidecar lock secara manual saat aplikasi berjalan. Tidak ada enkripsi, pencarian semantik/asosiatif, TTL, consolidation, atau garbage collection otomatis. Penghapusan logis melalui `delete`; retensi media ditangani aplikasi/host.
+`SecureMemoryStore::open(path, encryption_key, signing_key)` adalah jalur secure baru. Payload record dienkripsi dengan AES-256-GCM menggunakan nonce acak dari OS, lalu ciphertext ditandatangani Ed25519. Signature diverifikasi sebelum dekripsi; modifikasi ciphertext, signature, atau nonce ditolak. Kunci 32-byte tidak pernah ditulis ke file dan harus datang dari secret manager aplikasi.
+
+Berbeda dari `MemoryStore::open`, `SecureMemoryStore` tidak menahan lock selama umur object. Setiap `put` melakukan read-modify-write di bawah exclusive sidecar lock, membaca snapshot terbaru sebelum mutasi, dan menulis atomic encrypted snapshot. Dua instance dapat dibuka bergantian dan tidak menimpa update yang sudah dibuat writer lain. Ini adalah transaksi multi-writer serializable per mutasi, bukan transaksi batch lintas beberapa mutasi.
+
+Secure storage belum melakukan rotasi kunci otomatis, backup, key escrow, atau migrasi otomatis dari JSON plaintext. Aplikasi harus memilih jalur secure sejak awal dan mengelola kunci di luar repository.
+
+## Retrieval dan pembelajaran
+
+`LearningMemory` menyimpan experience dengan features, target, feedback, importance, dan embedding opsional. `recall_similar` memakai cosine feature similarity; `recall_text_similar` memakai embedding teks. `infer_with_memory` menginjeksikan support hasil recall ke neuron aksi LIF, sedangkan `replay_relevant` menjalankan experience melalui input, teacher spike, evaluator reward, dan reward-modulated STDP.
+
+`infer_task_with_memory_adaptive` menolak injeksi ketika similarity di bawah ambang validasi. Pada benchmark M10, temporal voting lima observasi noisy digabungkan dengan fallback tanpa memori pada noise ekstrem. Ini menjaga akurasi ketika evidence memory tidak cukup kuat, alih-alih memaksakan asosiasi lama.
+
+`find_conflicts` mendeteksi target berbeda pada fitur mirip. `consolidate` meningkatkan importance dan melindungi asosiasi. `decay_irrelevant` melakukan pelupaan terkontrol berdasarkan similarity dan importance policy. Retrieval score bukan probabilitas.
+
+## Kalibrasi
+
+`DecisionMetrics` menyediakan accuracy, precision, recall, FPR, FNR, abstain, dan alasan abstain. `CalibrationEvaluator` menghitung Brier score dan mean absolute calibration error dari confidence probabilistik tervalidasi. Untuk melatih kalibrasi dari split validasi, gunakan `PlattCalibrator::fit` atau `IsotonicCalibrator::fit`; keduanya memiliki `predict` yang menghasilkan nilai pada `0..1`. Score linear dan margin decision tidak boleh dianggap probabilitas.
+
+## Batasan
+
+Hash embedding sensitif terhadap bahasa, tokenisasi, dan collision dimensi. SecureMemoryStore bergantung pada keamanan kunci yang diberikan aplikasi dan tidak menjadikan plaintext store lama otomatis aman. Benchmark M10 diperbesar menjadi 12 seed × 4 varian × 16 repetisi dan menguji noise 30/50/70 nA dengan temporal ensemble. `examples/iris_real_dataset.rs` juga menjalankan 120 train/30 test pada dataset UCI Iris di `data/iris_uci.csv`; hasil aktual dicatat di `results/iris_uci_generalization_2026-10-19.csv`. Iris adalah dataset kecil dan mudah, sehingga bukan bukti generalisasi produksi universal.
+
+## M11 self-learning
+
+Runner M11 membentuk memory secara autonomous dari salah prediksi, abstain, evidence rendah, dan sebagian pengalaman benar yang dipilih deterministik. Validation feedback disimpan pada task terpisah lalu dipakai oleh replay relevan sebelum validation diukur ulang. Store dibuka ulang setelah restart untuk menguji persistence.
+
+Hasil aktual M11 menunjukkan memory-assisted LIF meningkatkan accuracy terhadap jalur LIF/STDP tanpa memory, tetapi retrieval eksternal masih lebih tinggi. Self-improvement loop juga belum selalu memperbaiki validation; pada hasil lima seed terakhir delta rata-rata adalah `-0.166667`. Angka ini dipertahankan sebagai hasil negatif yang terukur.

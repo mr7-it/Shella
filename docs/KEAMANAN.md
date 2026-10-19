@@ -2,18 +2,22 @@
 
 ## File dan integritas
 
-Checkpoint dan `MemoryStore` ditulis ke file sementara eksklusif pada direktori tujuan, isi file disinkronkan, lalu dipasang melalui `rename`. Keatomikan penggantian mengikuti semantik filesystem/OS. Sinkronisasi direktori setelah rename bersifat best-effort; API tidak menjanjikan durability terhadap seluruh skenario mati listrik. Pada Unix file sementara dibuat dengan permission pemilik `0600`. Penggantian file tujuan lama melalui `rename` telah diverifikasi pada lingkungan Linux yang digunakan.
+Checkpoint dan store ditulis ke file sementara eksklusif, disinkronkan, lalu dipasang melalui `rename`. Sinkronisasi direktori setelah rename bersifat best-effort; API tidak menjanjikan durability terhadap seluruh skenario mati listrik. Pada Unix file sementara dibuat dengan permission pemilik `0600`. Store memori dibatasi 64 MiB dan checkpoint 256 MiB.
 
-Checkpoint dibatasi 256 MiB dan store memori 64 MiB. Pembacaan membatasi jumlah byte; deserialisasi memeriksa versi schema, checksum, domain nilai, topologi, counter, dan invariants state sebelum data dipakai. Checksum FNV-1a mendeteksi kerusakan tak sengaja saja. Algoritmenya bukan kriptografis dan bukan autentikasi: penyerang yang dapat mengganti konten juga dapat menghitung checksum baru.
+`MemoryStore` legacy memakai JSON dan checksum FNV-1a. Checksum hanya mendeteksi korupsi tak sengaja, bukan autentikasi atau kerahasiaan. Format ini single-writer dengan advisory lock yang ditahan selama object terbuka.
 
-Store JSON memori hanya mendukung satu proses penulis per path. Tidak ada file lock, transaksi lintas proses, enkripsi at-rest, penghapusan aman dari media, retensi otomatis, atau proteksi kerahasiaan selain permission filesystem. Jangan membuka path yang sama dengan beberapa writer. Jangan mempercayai checkpoint/store dari sumber tidak tepercaya sebagai batas keamanan aplikasi.
+`SecureMemoryStore` menyediakan jalur aman: payload dienkripsi AES-256-GCM dengan nonce acak dari OS, ciphertext ditandatangani Ed25519, lalu envelope JSON ditulis secara atomic. Signature diverifikasi sebelum dekripsi. Setiap mutasi mengambil sidecar lock hanya selama read-modify-write sehingga beberapa object/writer dapat bergantian secara serializable per mutasi. Ini bukan transaksi batch lintas beberapa mutasi.
+
+Kunci enkripsi dan signing key harus 32-byte, dikelola secret manager, tidak dicatat ke log, tidak disimpan di repository, dan memiliki prosedur rotasi aplikasi sendiri. SecureMemoryStore belum menyediakan key rotation, backup terenkripsi, escrow, atau migrasi otomatis dari JSON legacy.
+
+## Retensi dan embedding
+
+`MemoryStore::put_with_ttl` menyimpan expiry Unix dan open/purge berikutnya menghapus record expired. TTL bukan secure deletion dari media. `TextEmbedding` adalah hashing lexical deterministik dari token dan character n-gram; ia tidak memberi kerahasiaan dan bukan model semantik neural.
 
 ## Validasi input dan komputasi
 
-Parameter numerik konfigurasi dan arus diperiksa finite/domain-nya; ukuran topologi kosong, indeks, delay, target aksi, dan skor invalid ditolak. Jaringan menggunakan `try_reserve` pada alokasi neuron/event kritis; allocation errors yang terdeteksi menjadi `SimError`. Teks dinormalisasi dengan batas 1 MiB dan menolak NUL. Key/tag memory dibatasi 16 KiB tanpa karakter kontrol. File output storage dibatasi sesuai nilai di atas.
-
-Tidak ada batas global jumlah neuron/sinaps yang aman untuk setiap deployment: alokasi perlu disesuaikan kapasitas host dan beban kerja. SDK sinkron; operasi panjang tidak dapat dibatalkan melalui API SDK. Aplikasi server/layanan harus menerapkan kuota, timeout, autentikasi, izin path, dan isolasi proses sendiri sebelum mengekspos API ke jaringan.
+Parameter numerik, arus, key/tag, embedding, topologi, dan confidence kalibrasi divalidasi finite/domain-nya. Alokasi kritis menggunakan `try_reserve`; allocation errors yang terdeteksi menjadi `SimError`. Aplikasi server tetap harus menerapkan kuota, timeout, autentikasi, izin path, dan isolasi proses.
 
 ## Dependency dan kode
 
-Dependency langsung runtime adalah `serde` dan `serde_json`, terkunci di `Cargo.lock`. Source melarang unsafe code (`unsafe_code = "forbid"`). Audit versi/lisensi yang tercatat ada pada `docs/REFERENSI.md`; status kerentanan eksternal tidak dijamin oleh pemeriksaan compile/test dan perlu dipantau melalui toolchain/dependency audit organisasi.
+Dependency runtime meliputi `serde`, `serde_json`, `fs2`, `aes-gcm`, `ed25519-dalek`, dan `getrandom`, terkunci di `Cargo.lock`. Source melarang unsafe code (`unsafe_code = "forbid"`). Pemeriksaan compile/test tidak menggantikan audit kerentanan dependency berkala.

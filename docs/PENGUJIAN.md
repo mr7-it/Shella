@@ -11,6 +11,7 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-targets --locked
 cargo test --release --locked
 cargo run --release --locked
+cargo run --release --example milestone10_long_term --locked
 cargo bench --bench learning --locked
 cargo bench --bench system --locked
 ```
@@ -29,8 +30,12 @@ MSRV di manifest adalah Rust 1.85. Jalankan gerbang di stable dan MSRV jika peru
 - `tests/decision_engine.rs`: skor/kontribusi terhitung, tie-break, abstain, unknown features, invalid input, overflow skor, dan overflow margin.
 - `tests/language_pipeline.rs`: normalisasi, aturan tokenizer Unicode, vocabulary deterministik/unknown, pemisahan train/eval, arus encoder, serta penolakan input tanpa token.
 - `tests/sdk_integration.rs`: teks -> input neuron -> network terlatih -> reward evaluator -> held-out action -> decision -> memory -> checkpoint.
+- Unit test evaluator kalibrasi: confidence di luar `0..1` ditolak dan Brier/MAE dihitung dari confidence probabilistik yang diberikan.
+- `tests/milestone10_secure_adaptive.rs`: embedding semantic retrieval, TTL restart, enkripsi AES-GCM, signature Ed25519, writer bergantian, Platt scaling, dan isotonic regression.
+- `examples/milestone10_long_term.rs`: runner release 12 seed × 4 varian × 16 repetisi untuk restart, retensi, konflik, replay error, pelupaan, noise holdout, confusion metrics, dan kalibrasi; runner memakai jaringan dan memori aktual.
+- `examples/iris_real_dataset.rs`: runner data nyata UCI Iris dengan 120 train/30 test, normalisasi train-only, retrieval memory, dan evaluasi noise holdout.
 
-Pada verifikasi Milestone 6 terdapat **91 entri test harness**: 3 unit + 88 integrasi. Ketiganya lulus pada `cargo test --all-targets --locked`, `cargo test --release --locked`, dan MSRV 1.85.0; Clippy ketat juga lulus pada kedua toolchain. Dua entri integrasi adalah helper child-process yang juga dipanggil dan diverifikasi oleh parent test. Lihat [laporan validasi sebelumnya](../LAPORAN_VALIDASI.md) dan [laporan Milestone 6](../LAPORAN_MILESTONE_6.md).
+Pada verifikasi M10 di sandbox dengan Rust 1.97.1, `cargo fmt --all -- --check`, `cargo check --all-targets --all-features`, Clippy `-D warnings`, test debug, dan test release lulus setelah adaptive ensemble/gate. Runner M10 dan runner Iris juga lulus serta outputnya cocok dengan CSV tersimpan. Klaim ini tidak menggantikan verifikasi pada MSRV atau perangkat deployment.
 
 ## Benchmark
 
@@ -41,3 +46,9 @@ Pada verifikasi Milestone 6 terdapat **91 entri test harness**: 3 unit + 88 inte
 `benches/system.rs` mengukur median lima batch untuk network 16/64/256 neuron dengan ring synapses dan delayed event, checkpoint save/restore 64 neuron, serta prefix/tag retrieval store berisi 256 record. Tidak ada warm-up terpisah pada benchmark system. Hasil bukan peak memory, beban multi-proses, atau jaminan performa deployment.
 
 `examples/capacity_probe.rs` dan `scripts/run_capacity_probe.sh` menjalankan workload terpisah untuk RSS/peak RSS Linux, build, median step, checkpoint save dan byte size sampai 16,384 neuron/65,536 sinaps. Hasil aktual Sandbox disimpan pada `results/capacity_sandbox_2026-10-19.csv` dan raw NDJSON; hasil tersebut bukan pengukuran perangkat pengguna.
+
+## Pengujian Milestone 11
+
+`examples/milestone11_self_learning.rs` menjalankan lima seed dan menghasilkan 35 baris: tiga jalur test bersih, memory pada noise ±0.25, continual old-task setelah replay, self-loop validation, dan persistence setelah restart. Test Iris tidak dimasukkan ke memory sebelum evaluasi test. Scaler dan pemilihan memory current memakai train/validation saja; test hanya dievaluasi di akhir.
+
+Regression test `tests/milestone11_self_learning.rs` memverifikasi split disjoint, label stratified, train-only scaler, k-fold tanpa overlap, dan self-evaluation. Hasil M11 lengkap ada pada `LAPORAN_MILESTONE_11.md`.

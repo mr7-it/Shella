@@ -12,6 +12,10 @@ pub struct MemoryRecord {
     pub(super) key: String,
     pub(super) value: Value,
     pub(super) tags: Vec<String>,
+    #[serde(default)]
+    pub(super) embedding: Option<Vec<f32>>,
+    #[serde(default)]
+    pub(super) expires_at_unix: Option<u64>,
 }
 
 impl MemoryRecord {
@@ -34,6 +38,23 @@ impl MemoryRecord {
     #[must_use]
     pub fn tags(&self) -> &[String] {
         &self.tags
+    }
+
+    /// Embedding terhitung saat record ditulis, bila tersedia.
+    #[must_use]
+    pub fn embedding(&self) -> Option<&[f32]> {
+        self.embedding.as_deref()
+    }
+
+    #[must_use]
+    pub fn expires_at_unix(&self) -> Option<u64> {
+        self.expires_at_unix
+    }
+
+    #[must_use]
+    pub fn is_expired(&self, now_unix: u64) -> bool {
+        self.expires_at_unix
+            .is_some_and(|expires| expires <= now_unix)
     }
 }
 

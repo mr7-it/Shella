@@ -240,6 +240,86 @@ impl DecisionEvaluator {
     }
 }
 
+/// Akumulasi kalibrasi untuk confidence pada rentang probabilitas `[0, 1]`.
+/// Skor linear dan margin keputusan tidak diterima karena keduanya bukan probabilitas.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CalibrationMetrics {
+    samples: u64,
+    brier_sum: f64,
+    absolute_error_sum: f64,
+}
+
+impl CalibrationMetrics {
+    #[must_use]
+    pub const fn samples(self) -> u64 {
+        self.samples
+    }
+
+    /// Brier score rata-rata; makin kecil makin baik.
+    #[must_use]
+    pub fn brier_score(self) -> Option<f64> {
+        rate_f64(self.brier_sum, self.samples)
+    }
+
+    /// Galat absolut rata-rata antara confidence dan outcome biner.
+    #[must_use]
+    pub fn mean_absolute_calibration_error(self) -> Option<f64> {
+        rate_f64(self.absolute_error_sum, self.samples)
+    }
+}
+
+/// Evaluator terpisah untuk confidence probabilistik yang sudah dikalibrasi.
+/// Library tidak mengubah score linear menjadi probabilitas secara diam-diam.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CalibrationEvaluator {
+    metrics: CalibrationMetrics,
+}
+
+impl CalibrationEvaluator {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            metrics: CalibrationMetrics {
+                samples: 0,
+                brier_sum: 0.0,
+                absolute_error_sum: 0.0,
+            },
+        }
+    }
+
+    /// Mencatat confidence dan hasil biner aktual.
+    pub fn record(&mut self, confidence: f64, correct: bool) -> Result<(), SimError> {
+        if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
+            return Err(SimError::InvalidInput {
+                parameter: "calibrated_confidence",
+                reason: "harus finite dan berada pada rentang 0..1",
+            });
+        }
+        let error = confidence - f64::from(correct);
+        let mut next = self.metrics;
+        next.samples = next
+            .samples
+            .checked_add(1)
+            .ok_or(SimError::CounterOverflow {
+                counter: "sampel kalibrasi",
+            })?;
+        next.brier_sum += error * error;
+        next.absolute_error_sum += error.abs();
+        if !next.brier_sum.is_finite() || !next.absolute_error_sum.is_finite() {
+            return Err(SimError::NumericalOverflow {
+                operation: "akumulasi kalibrasi",
+            });
+        }
+        self.metrics = next;
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn metrics(&self) -> CalibrationMetrics {
+        self.metrics
+    }
+}
+
 fn increment(value: &mut u64) -> Result<(), SimError> {
     *value = value.checked_add(1).ok_or(SimError::CounterOverflow {
         counter: "metrik keputusan",
@@ -251,14 +331,30 @@ fn rate(numerator: u64, denominator: u64) -> Option<f64> {
     (denominator > 0).then(|| numerator as f64 / denominator as f64)
 }
 
+fn rate_f64(numerator: f64, denominator: u64) -> Option<f64> {
+    (denominator > 0).then(|| numerator / denominator as f64)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::DecisionMetrics;
+    use super::{CalibrationEvaluator, DecisionMetrics};
 
     #[test]
     fn precision_recall_tidak_terdefinisi_tanpa_positif() {
         let metrics = DecisionMetrics::default();
         assert_eq!(metrics.precision(), None);
         assert_eq!(metrics.recall(), None);
+    }
+
+    #[test]
+    fn kalibrasi_hanya_menerima_confidence_probabilistik() {
+        let mut evaluator = CalibrationEvaluator::new();
+        assert!(evaluator.record(1.2, true).is_err());
+        evaluator.record(0.9, true).expect("confidence valid");
+        evaluator.record(0.2, false).expect("confidence valid");
+        let metrics = evaluator.metrics();
+        assert_eq!(metrics.samples(), 2);
+        assert!((metrics.brier_score().expect("brier") - 0.025).abs() < 1e-12);
+        assert!((metrics.mean_absolute_calibration_error().expect("mae") - 0.15).abs() < 1e-12);
     }
 }
