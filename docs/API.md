@@ -75,3 +75,7 @@ API ini sinkron dalam proses. Tidak ada timeout, cancellation, transport, server
 `IrisSample` merepresentasikan satu baris data tanpa mengubah nilai asli. `stratified_split` membentuk train/validation/test per kelas, sedangkan `stratified_folds` membentuk k-fold hanya pada indeks non-test. `TrainScaler` fit pada indeks train dan `transform` menerapkan parameter tersebut ke validation/test. `evaluate_predictions` menghasilkan `SelfEvaluation` yang memuat `DecisionMetrics`, jumlah sampel lemah, dan jumlah sampel uncertainty.
 
 Runner M11 memakai `LearningMemory::record_feedback`, `recall_similar`, `infer_task_with_memory_adaptive`, dan `replay_task_relevant` bersama `LifNetwork` reward-modulated STDP. Retrieval eksternal dilaporkan terpisah dari output neural sehingga kontribusi memory terhadap jalur LIF dapat dibandingkan secara eksplisit.
+
+## Perbaikan M11
+
+`LifNetwork::apply_rewarded_readout` melakukan bounded signed update pada sinaps readout aktual dan melengkapi eligibility reward-modulated STDP. `LearningMemory::record_prototype` dan `load_prototypes` menyimpan serta memulihkan prototype neural terkonsolidasi. `LearningMemory::discard_task` menjadi rollback untuk feedback task yang tidak meningkatkan validation. Runner memakai prototype yang fit dari train saja, bukan test atau retrieval eksternal.

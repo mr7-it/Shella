@@ -266,6 +266,59 @@ impl LearningMemory {
         self.len() == 0
     }
 
+    /// Menghapus seluruh pengalaman dari task eksperimen yang tidak lolos validasi.
+    /// Dipakai oleh adaptive self-improvement agar update negatif tidak menjadi
+    /// pengetahuan permanen.
+    pub fn discard_task(&mut self, task_id: &str) -> Result<usize, SimError> {
+        validate_task_id(task_id)?;
+        let keys = self
+            .store
+            .records()
+            .filter_map(|record| {
+                if !record.key().starts_with(EXPERIENCE_PREFIX) {
+                    return None;
+                }
+                decode_experience(record.value())
+                    .ok()
+                    .filter(|experience| experience.task_id == task_id)
+                    .map(|_| record.key().to_owned())
+            })
+            .collect::<Vec<_>>();
+        let mut removed = 0;
+        for key in keys {
+            removed += usize::from(self.store.delete(&key)?);
+        }
+        Ok(removed)
+    }
+
+    /// Menyimpan prototype neural terlatih sebagai pengalaman konsolidasi.
+    pub fn record_prototype(
+        &mut self,
+        task_id: &str,
+        class: usize,
+        features: &[f64],
+    ) -> Result<MemoryFeedbackWrite, SimError> {
+        self.record_with_feedback(task_id, features, Some(class), 1.0, 10.0)
+    }
+
+    /// Memulihkan prototype neural terakhir per class dari memory persisten.
+    pub fn load_prototypes(&self, task_id: &str) -> Result<Vec<(usize, Vec<f64>)>, SimError> {
+        validate_task_id(task_id)?;
+        let mut prototypes = std::collections::BTreeMap::new();
+        for record in self.store.records() {
+            if !record.key().starts_with(EXPERIENCE_PREFIX) {
+                continue;
+            }
+            let experience = decode_experience(record.value())?;
+            if experience.task_id == task_id {
+                if let Some(class) = experience.expected_action {
+                    prototypes.insert(class, experience.features);
+                }
+            }
+        }
+        Ok(prototypes.into_iter().collect())
+    }
+
     /// Menyimpan target dan prediksi; salah prediksi mendapat importance/replay lebih tinggi.
     pub fn record_feedback(
         &mut self,

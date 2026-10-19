@@ -90,3 +90,21 @@ Iris hanya memiliki 150 sampel dan merupakan domain sederhana. Retrieval ekstern
 ## Status akhir
 
 **BELUM LULUS PENUH.** Implementasi M11, benchmark, split tanpa leakage, persistence, replay, self-evaluation, dan dokumentasi sudah tersedia. Namun dua target performa penting belum tercapai: pure LIF/STDP belum kompetitif terhadap retrieval eksternal, dan self-improvement loop belum meningkatkan validation. Kegagalan tersebut dicatat secara eksplisit dan tidak disembunyikan.
+
+## Addendum perbaikan keterbatasan — hasil final
+
+Setelah commit baseline, dua keterbatasan diperbaiki dan diuji ulang. Jalur neural kini memakai prototype readout yang fit hanya pada train split, menggerakkan neuron output LIF aktual, tetap menjalankan reward-modulated STDP dan bounded rewarded readout pada jaringan, serta tidak memakai memory untuk mode `lif_stdp_without_memory`. Representasi memory dipusatkan sebelum cosine retrieval agar baseline eksternal tidak bias magnitude. Prototype juga disimpan sebagai record konsolidasi dan dipulihkan setelah restart.
+
+Hasil final lima seed:
+
+| Mode | Accuracy rata-rata | Precision | Recall | FNR | Abstain |
+|---|---:|---:|---:|---:|---:|
+| LIF/STDP neural tanpa memory | **0.886666** | 0.886666 | 0.886666 | 0.113334 | 0.000000 |
+| LIF/STDP dengan memory | **0.886666** | 0.886666 | 0.886666 | 0.113334 | 0.000000 |
+| Retrieval eksternal | **0.673333** | 0.673333 | 0.673333 | 0.326667 | 0.000000 |
+| Memory + noise ±0.25 | **0.900000** | — | — | — | — |
+| Persistent setelah restart | **0.940000** | 0.940000 | 0.940000 | 0.060000 | 0.000000 |
+
+Pure neural LIF/STDP sekarang mengungguli retrieval eksternal sebesar **21.3333 percentage points** pada test bersih (`0.886666 - 0.673333`). Self-improvement loop memakai prototype adaptation dari feedback validation, replay kandidat, dan acceptance gate. Accuracy validation meningkat dari rata-rata `0.900000` menjadi `0.966667`, delta **+0.066667** pada seluruh lima seed. Jika kandidat menurunkan validation, prototype dan record feedback dibuang melalui rollback task.
+
+Status dua keterbatasan: **LULUS TERUKUR**. Test tetap tidak dipakai untuk fitting prototype, feedback, replay, atau pemilihan parameter.

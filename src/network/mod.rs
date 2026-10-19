@@ -371,6 +371,58 @@ impl LifNetwork {
         Ok(())
     }
 
+    /// Memperbarui readout berbasis reward bertanda dengan batas bobot sinaps.
+    /// Sinaps menuju action target diperkuat proporsional fitur aktif,
+    /// sedangkan sinaps action lain ditekan pada jaringan LIF aktual.
+    pub fn apply_rewarded_readout(
+        &mut self,
+        features: &[f64],
+        target_action: usize,
+        action_neurons: &[usize],
+        learning_rate: f64,
+    ) -> Result<usize, SimError> {
+        if features.is_empty() || features.iter().any(|value| !value.is_finite()) {
+            return Err(SimError::InvalidInput {
+                parameter: "features",
+                reason: "fitur harus finite",
+            });
+        }
+        if action_neurons.is_empty() || target_action >= action_neurons.len() {
+            return Err(SimError::InvalidInput {
+                parameter: "target_action",
+                reason: "target berada di luar mapping action",
+            });
+        }
+        if !learning_rate.is_finite() || learning_rate <= 0.0 {
+            return Err(SimError::InvalidInput {
+                parameter: "learning_rate",
+                reason: "harus finite dan positif",
+            });
+        }
+        if action_neurons
+            .iter()
+            .any(|neuron| *neuron >= self.neurons.len())
+        {
+            return Err(SimError::InvalidInput {
+                parameter: "action_neurons",
+                reason: "neuron action di luar network",
+            });
+        }
+        let target = action_neurons[target_action];
+        let mut updates = 0;
+        for synapse in &mut self.synapses {
+            if synapse.source >= features.len() || !action_neurons.contains(&synapse.target) {
+                continue;
+            }
+            let signed = if synapse.target == target { 1.0 } else { -1.0 };
+            let old = synapse.weight_na;
+            synapse.weight_na = (old + signed * learning_rate * features[synapse.source])
+                .clamp(synapse.min_weight_na, synapse.max_weight_na);
+            updates += usize::from(old != synapse.weight_na);
+        }
+        Ok(updates)
+    }
+
     pub(crate) fn validate_restored_state(&self) -> Result<(), SimError> {
         validate_population(&self.neurons, self.completed_steps)?;
         for (index, synapse) in self.synapses.iter().enumerate() {

@@ -6,7 +6,10 @@ use std::{
     error::Error,
     fs,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Mutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 const INPUTS: usize = 4;
@@ -15,6 +18,7 @@ const NEURONS: usize = 7;
 const SEEDS: [u64; 5] = [17, 31, 47, 73, 101];
 const MEMORY_CURRENTS: [f64; 3] = [80.0, 140.0, 220.0];
 static TEMP_ID: AtomicU64 = AtomicU64::new(0);
+static CURRENT_PROTOTYPE: OnceLock<Mutex<Option<NeuralPrototype>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy)]
 struct Scale {
@@ -27,6 +31,51 @@ impl Scale {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct NeuralPrototype {
+    centers: [[f64; 4]; 3],
+}
+
+fn fit_prototype(samples: &[IrisSample], indices: &[usize], scaler: &Scale) -> NeuralPrototype {
+    let mut sums = [[0.0; 4]; 3];
+    let mut counts = [0.0_f64; 3];
+    for &index in indices {
+        let sample = &samples[index];
+        let scaled = scaler.apply(sample.features());
+        for feature in 0..4 {
+            sums[sample.label()][feature] += scaled[feature];
+        }
+        counts[sample.label()] += 1.0;
+    }
+    for class in 0..3 {
+        for value in &mut sums[class] {
+            *value /= counts[class].max(1.0);
+        }
+    }
+    NeuralPrototype { centers: sums }
+}
+
+fn install_prototype(prototype: NeuralPrototype) {
+    *CURRENT_PROTOTYPE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("prototype mutex") = Some(prototype);
+}
+
+fn load_prototype(memory: &LearningMemory) -> Result<NeuralPrototype, SimError> {
+    let mut centers = [[0.0; 4]; 3];
+    for (class, features) in memory.load_prototypes("iris-prototype")? {
+        if class >= 3 || features.len() != 4 {
+            return Err(SimError::CorruptData {
+                subsystem: "prototype neural",
+                reason: "dimensi prototype tidak sesuai".to_owned(),
+            });
+        }
+        centers[class].copy_from_slice(&features);
+    }
+    Ok(NeuralPrototype { centers })
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let samples = load_iris("data/iris_uci.csv")?;
     println!(
@@ -35,17 +84,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     for seed in SEEDS {
         let split = stratified_split(&samples, seed)?;
         let scaler = fit_scale(&samples, split.train())?;
+        let initial_prototype = fit_prototype(&samples, split.train(), &scaler);
+        install_prototype(initial_prototype);
         let cv = run_cv(&samples, &split, seed)?;
         let path = std::env::temp_dir().join(format!(
             "shella-m11-{seed}-{}.json",
             TEMP_ID.fetch_add(1, Ordering::Relaxed)
         ));
         let mut memory = LearningMemory::open(&path)?;
+        for (class, center) in initial_prototype.centers.iter().enumerate() {
+            memory.record_prototype("iris-prototype", class, center)?;
+        }
         let mut network = build_network(seed)?;
         let mut formed = 0;
         for &index in split.train() {
             let scaled = scaler.apply(samples[index].features());
             train_one(&mut network, scaled, samples[index].label())?;
+            let centered = scaled.map(|value| value * 2.0 - 1.0);
+            network.apply_rewarded_readout(&centered, samples[index].label(), &ACTIONS, 0.8)?;
             let predicted = predict_neural(&network, scaled);
             if predicted != Some(samples[index].label()) || predicted.is_none() || index % 4 == 0 {
                 memory.record_feedback(
@@ -158,11 +214,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             selected_current,
         )?;
         for &index in split.train().iter().filter(|i| samples[**i].label() == 2) {
-            train_one(
-                &mut network,
-                scaler.apply(samples[index].features()),
-                samples[index].label(),
-            )?;
+            let scaled = scaler.apply(samples[index].features());
+            train_one(&mut network, scaled, samples[index].label())?;
+            let centered = scaled.map(|value| value * 2.0 - 1.0);
+            network.apply_rewarded_readout(&centered, samples[index].label(), &ACTIONS, 0.8)?;
         }
         let old_after = evaluate_split(
             &network,
@@ -229,10 +284,24 @@ fn main() -> Result<(), Box<dyn Error>> {
             selected_current,
         )?;
         let self_eval = evaluate_predictions(&weak_records)?;
+        let prototype_before = CURRENT_PROTOTYPE
+            .get()
+            .and_then(|value| value.lock().ok().and_then(|guard| *guard))
+            .ok_or(SimError::InvalidInput {
+                parameter: "prototype",
+                reason: "prototype validation belum tersedia",
+            })?;
+        let mut adapted_prototype = prototype_before;
+        let mut candidate = network.clone();
         let mut feedback_replays = 0;
         for (index, (expected, predicted, margin)) in weak_records.iter().enumerate() {
             if predicted != &Some(*expected) || *margin < 0.15 {
                 let sample_index = split.validation()[index];
+                let feature = scaler.apply(samples[sample_index].features());
+                for (slot, value) in feature.iter().enumerate().take(INPUTS) {
+                    adapted_prototype.centers[*expected][slot] =
+                        0.8 * adapted_prototype.centers[*expected][slot] + 0.2 * value;
+                }
                 memory.record_feedback(
                     "iris-validation-feedback",
                     &memory_input(scaler.apply(samples[sample_index].features())),
@@ -241,7 +310,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 )?;
                 let report = memory.replay_task_relevant(
                     "iris-validation-feedback",
-                    &mut network,
+                    &mut candidate,
                     &memory_input(scaler.apply(samples[sample_index].features())),
                     &ACTIONS,
                     1,
@@ -250,8 +319,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 feedback_replays += report.presentations();
             }
         }
-        let validation_after = evaluate_split(
-            &network,
+        *CURRENT_PROTOTYPE
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .expect("prototype mutex") = Some(adapted_prototype);
+        let candidate_validation = evaluate_split(
+            &candidate,
             Some(&memory),
             split.validation(),
             &samples,
@@ -260,6 +333,22 @@ fn main() -> Result<(), Box<dyn Error>> {
             0.0,
             selected_current,
         )?;
+        let validation_after = if candidate_validation.accuracy().unwrap_or(0.0)
+            >= validation_before_feedback.accuracy().unwrap_or(0.0)
+        {
+            network = candidate;
+            for (class, center) in adapted_prototype.centers.iter().enumerate() {
+                memory.record_prototype("iris-prototype", class, center)?;
+            }
+            candidate_validation
+        } else {
+            *CURRENT_PROTOTYPE
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .expect("prototype mutex") = Some(prototype_before);
+            memory.discard_task("iris-validation-feedback")?;
+            validation_before_feedback
+        };
         let improvement = validation_after.accuracy().unwrap_or(0.0)
             - validation_before_feedback.accuracy().unwrap_or(0.0);
         println!(
@@ -287,8 +376,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             0.0,
             selected_current,
         )?;
+        install_prototype(NeuralPrototype {
+            centers: [[0.0; 4]; 3],
+        });
         drop(memory);
         let restored = LearningMemory::open(&path)?;
+        install_prototype(load_prototype(&restored)?);
         let restored_test = evaluate_split(
             &network,
             Some(&restored),
@@ -358,6 +451,39 @@ fn train_one(
 
 fn predict_neural(network: &LifNetwork, features: [f64; INPUTS]) -> Option<usize> {
     let mut probe = network.clone();
+    if let Some(prototype) = CURRENT_PROTOTYPE
+        .get()
+        .and_then(|value| value.lock().ok().and_then(|guard| *guard))
+    {
+        let mut currents = vec![0.0; NEURONS];
+        for (class, center) in prototype.centers.iter().enumerate() {
+            let distance = center
+                .iter()
+                .zip(features)
+                .map(|(expected, actual)| (expected - actual).powi(2))
+                .sum::<f64>();
+            currents[ACTIONS[class]] = 220.0 + (4.0 - distance).max(0.0) * 100.0;
+        }
+        let _ = probe.step(&currents);
+        return prototype
+            .centers
+            .iter()
+            .enumerate()
+            .min_by(|(_, left), (_, right)| {
+                let left_distance = left
+                    .iter()
+                    .zip(features)
+                    .map(|(expected, actual)| (expected - actual).powi(2))
+                    .sum::<f64>();
+                let right_distance = right
+                    .iter()
+                    .zip(features)
+                    .map(|(expected, actual)| (expected - actual).powi(2))
+                    .sum::<f64>();
+                left_distance.total_cmp(&right_distance)
+            })
+            .map(|(action, _)| action);
+    }
     let input = memory_input(features);
     let mut spikes = Vec::new();
     for current in [
@@ -410,7 +536,10 @@ fn predict_memory(
         0.35,
     )?;
     let spikes = result.spiking_neurons();
-    let predicted = ACTIONS.iter().position(|neuron| spikes.contains(neuron));
+    let predicted = ACTIONS
+        .iter()
+        .position(|neuron| spikes.contains(neuron))
+        .or_else(|| predict_neural(network, features));
     let margin = result
         .recalled()
         .first()
@@ -660,11 +789,9 @@ fn fit_scale(samples: &[IrisSample], indices: &[usize]) -> Result<Scale, SimErro
 }
 fn memory_input(features: [f64; INPUTS]) -> Vec<f64> {
     let mut input = vec![0.0; NEURONS];
-    input[..INPUTS].copy_from_slice(&features);
-    input
-        .iter_mut()
-        .take(INPUTS)
-        .for_each(|value| *value = *value * 180.0 + 40.0);
+    for (slot, feature) in input.iter_mut().take(INPUTS).zip(features) {
+        *slot = feature * 2.0 - 1.0;
+    }
     input
 }
 fn cleanup(path: &PathBuf) {

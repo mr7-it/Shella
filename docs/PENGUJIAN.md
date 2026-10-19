@@ -52,3 +52,7 @@ Pada verifikasi M10 di sandbox dengan Rust 1.97.1, `cargo fmt --all -- --check`,
 `examples/milestone11_self_learning.rs` menjalankan lima seed dan menghasilkan 35 baris: tiga jalur test bersih, memory pada noise ±0.25, continual old-task setelah replay, self-loop validation, dan persistence setelah restart. Test Iris tidak dimasukkan ke memory sebelum evaluasi test. Scaler dan pemilihan memory current memakai train/validation saja; test hanya dievaluasi di akhir.
 
 Regression test `tests/milestone11_self_learning.rs` memverifikasi split disjoint, label stratified, train-only scaler, k-fold tanpa overlap, dan self-evaluation. Hasil M11 lengkap ada pada `LAPORAN_MILESTONE_11.md`.
+
+### Verifikasi perbaikan keterbatasan
+
+Benchmark final lima seed mengukur accuracy neural tanpa memory `0.886666` versus retrieval eksternal `0.673333`. Validation self-improvement meningkat dari `0.900000` menjadi `0.966667`; acceptance gate membuang kandidat yang menurunkan skor. Prototype neural disimpan ke memory, store dibuka ulang, prototype dipulihkan, lalu dievaluasi kembali. Hasil CSV final ada di `results/milestone11_self_learning_release_2026-10-19.csv`.

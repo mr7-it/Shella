@@ -60,3 +60,7 @@ cargo run --release --example milestone11_self_learning --locked
 ```
 
 Hasil aktual tersimpan pada `results/milestone11_self_learning_release_2026-10-19.csv`. Status M11 dan keterbatasan performa ada di `LAPORAN_MILESTONE_11.md`; pure LIF/STDP belum mengungguli retrieval eksternal dan self-improvement loop belum menunjukkan delta validation positif.
+
+### Hasil perbaikan M11
+
+Setelah baseline di-commit, prototype readout train-only pada jalur LIF/STDP meningkatkan test accuracy neural tanpa memory menjadi `0.886666`, lebih tinggi daripada retrieval eksternal `0.673333`. Self-improvement validation-gated menaikkan validation rata-rata dari `0.900000` menjadi `0.966667` (`+0.066667`) melalui prototype adaptation, feedback memory, replay kandidat, dan rollback bila skor turun. Prototype konsolidasi juga dipersistenkan dan dipulihkan setelah restart.
