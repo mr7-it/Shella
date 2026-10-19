@@ -13,6 +13,7 @@ impl DecisionPolicy {
                 runner_up_score: None,
                 margin: None,
                 contributions: Vec::new(),
+                abstention_reason: Some(AbstentionReason::NoCandidates),
                 reason: "tidak ada kandidat".to_owned(),
             });
         }
@@ -74,14 +75,23 @@ impl DecisionPolicy {
         } else {
             f64::INFINITY
         };
-        let (selected_id, reason) = if best_score < self.minimum_score {
-            (None, "skor kandidat terbaik di bawah ambang".to_owned())
+        let (selected_id, reason, abstention_reason) = if best_score < self.minimum_score {
+            (
+                None,
+                "skor kandidat terbaik di bawah ambang".to_owned(),
+                Some(AbstentionReason::BelowMinimumScore),
+            )
         } else if margin < self.minimum_margin {
-            (None, "margin kandidat di bawah ambang abstain".to_owned())
+            (
+                None,
+                "margin kandidat di bawah ambang abstain".to_owned(),
+                Some(AbstentionReason::BelowMinimumMargin),
+            )
         } else {
             (
                 Some(best_id),
                 "kandidat dengan skor linear tertinggi; seri diputus berdasarkan ID".to_owned(),
+                None,
             )
         };
         Ok(Decision {
@@ -90,9 +100,19 @@ impl DecisionPolicy {
             runner_up_score,
             margin: Some(margin),
             contributions,
+            abstention_reason,
             reason,
         })
     }
+}
+
+/// Alasan terstruktur mengapa kebijakan tidak memilih kandidat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbstentionReason {
+    NoCandidates,
+    BelowMinimumScore,
+    BelowMinimumMargin,
+    NoActionSignal,
 }
 
 /// Kontribusi satu fitur ke skor kandidat terpilih.
@@ -112,6 +132,7 @@ pub struct Decision {
     runner_up_score: Option<f64>,
     margin: Option<f64>,
     contributions: Vec<FeatureContribution>,
+    abstention_reason: Option<AbstentionReason>,
     reason: String,
 }
 impl Decision {
@@ -139,6 +160,11 @@ impl Decision {
     #[must_use]
     pub fn contributions(&self) -> &[FeatureContribution] {
         &self.contributions
+    }
+    /// Kategori abstain, atau `None` bila kandidat dipilih.
+    #[must_use]
+    pub const fn abstention_reason(&self) -> Option<AbstentionReason> {
+        self.abstention_reason
     }
     /// Penjelasan berdasarkan aturan aktual yang dieksekusi.
     #[must_use]

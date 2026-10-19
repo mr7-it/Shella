@@ -1,4 +1,4 @@
-use shella::{Candidate, DecisionPolicy, SimError};
+use shella::{AbstentionReason, Candidate, DecisionEvaluator, DecisionPolicy, SimError};
 use std::collections::BTreeMap;
 
 fn candidate(id: &str, values: &[(&str, f64)]) -> Candidate {
@@ -104,4 +104,92 @@ fn decision_menolak_candidate_invalid_unknown_feature_duplicate_id_dan_overflow(
         ]),
         Err(SimError::NumericalOverflow { .. })
     ));
+}
+
+#[test]
+fn metrik_keputusan_mengukur_false_positive_false_negative_dan_abstain() {
+    let mut evaluator = DecisionEvaluator::new();
+    evaluator
+        .record(Some("move"), Some("move"), None)
+        .expect("TP");
+    evaluator
+        .record(Some("move"), Some("wait"), None)
+        .expect("FP dan FN");
+    evaluator
+        .record(
+            Some("move"),
+            None,
+            Some(AbstentionReason::BelowMinimumMargin),
+        )
+        .expect("FN karena abstain");
+    evaluator
+        .record(None, None, Some(AbstentionReason::NoCandidates))
+        .expect("abstain benar untuk target diam");
+    evaluator
+        .record(None, Some("wait"), None)
+        .expect("false positive");
+
+    let metrics = evaluator.metrics();
+    assert_eq!(metrics.samples(), 5);
+    assert_eq!(metrics.true_positives(), 1);
+    assert_eq!(metrics.false_positives(), 2);
+    assert_eq!(metrics.false_negatives(), 2);
+    assert_eq!(metrics.abstentions(), 2);
+    assert_eq!(metrics.correct_abstentions(), 1);
+    assert_eq!(metrics.false_abstentions(), 1);
+    assert_eq!(metrics.below_minimum_margin(), 1);
+    assert_eq!(metrics.no_candidates(), 1);
+    assert_eq!(metrics.precision(), Some(1.0 / 3.0));
+    assert_eq!(metrics.recall(), Some(1.0 / 3.0));
+    assert_eq!(metrics.false_positive_rate(), Some(0.5));
+    assert_eq!(metrics.false_negative_rate(), Some(2.0 / 3.0));
+}
+
+#[test]
+fn decision_menyediakan_alasan_abstain_yang_terstruktur() {
+    let no_candidates = policy(0.0, 0.0).select(&[]).expect("kosong");
+    assert_eq!(
+        no_candidates.abstention_reason(),
+        Some(AbstentionReason::NoCandidates)
+    );
+    let low_score = policy(5.0, 0.0)
+        .select(&[candidate("move", &[("spike", 1.0)])])
+        .expect("skor rendah");
+    assert_eq!(
+        low_score.abstention_reason(),
+        Some(AbstentionReason::BelowMinimumScore)
+    );
+    let low_margin = policy(-10.0, 3.0)
+        .select(&[
+            candidate("move", &[("spike", 2.0)]),
+            candidate("wait", &[("spike", 1.5)]),
+        ])
+        .expect("margin rendah");
+    assert_eq!(
+        low_margin.abstention_reason(),
+        Some(AbstentionReason::BelowMinimumMargin)
+    );
+}
+
+#[test]
+fn evaluator_menghitung_abstain_sesuai_label_dan_alasan_policy() {
+    let mut evaluator = DecisionEvaluator::new();
+    let low_score = policy(5.0, 0.0)
+        .select(&[candidate("move", &[("spike", 1.0)])])
+        .expect("seleksi skor rendah");
+    evaluator
+        .evaluate_decision(Some("move"), &low_score)
+        .expect("abstain pada target aksi");
+
+    let no_candidates = policy(0.0, 0.0).select(&[]).expect("tanpa kandidat");
+    evaluator
+        .evaluate_decision(None, &no_candidates)
+        .expect("diam memang target");
+
+    let metrics = evaluator.metrics();
+    assert_eq!(metrics.false_negatives(), 1);
+    assert_eq!(metrics.false_abstentions(), 1);
+    assert_eq!(metrics.correct_abstentions(), 1);
+    assert_eq!(metrics.below_minimum_score(), 1);
+    assert_eq!(metrics.no_candidates(), 1);
 }

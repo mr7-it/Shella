@@ -44,6 +44,8 @@ SdkInput::Text {
 
 `Session::decide(&[Candidate])` mengembalikan skor linear, kontribusi fitur, margin, ID terpilih, dan alasan atau keputusan abstain. Skor/margin bukan confidence probabilistik. `Session::remember(key, serde_json::Value, tags)` melakukan upsert pada `MemoryStore` file-backed.
 
+Untuk evaluasi label keputusan secara terpisah dari reward jaringan, gunakan `DecisionEvaluator::record(expected, predicted, abstention_reason)` atau `evaluate_decision(expected, &decision)`. `DecisionMetrics` menyediakan jumlah TP/FP/FN, abstain dan alasannya, akurasi, precision, recall, false-positive rate pada target diam, serta false-negative rate pada target aksi. Rasio dengan denominator nol menghasilkan `None`.
+
 ## Evaluasi reward dan persistence
 
 `Session::evaluate_actions(output, target, action_neurons, evaluator)` memetakan indeks spike neuron ke kanal aksi sesuai urutan slice. Metode `evaluate_actions_and_apply` menerapkan reward signed ke jaringan; metode itu memerlukan konfigurasi reward-modulated STDP pada jaringan. Evaluasi/metric transactional: kegagalan update tidak mencatat metrik parsial.

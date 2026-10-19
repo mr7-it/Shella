@@ -22,15 +22,27 @@ pub mod sdk;
 
 pub use benchmark::{
     ConditioningBenchmarkConfig, ConditioningBenchmarkResult, ContinualBenchmarkConfig,
-    ContinualBenchmarkResult, ContinualSeedResult,
+    ContinualBenchmarkResult, ContinualReplayBenchmarkConfig, ContinualReplayBenchmarkResult,
+    ContinualReplayNoiseResult, ContinualReplayRunResult, ContinualReplayTaskMetrics,
+    ContinualReplayValidation, ContinualSeedResult, GeneralizationBenchmarkConfig,
+    GeneralizationBenchmarkResult, GeneralizationNoiseResult, GeneralizationRunResult,
+    InterferenceBenchmarkConfig, InterferenceBenchmarkResult, InterferenceSeedResult,
+    LongTermLearningBenchmarkConfig, LongTermLearningBenchmarkResult,
+    LongTermLearningNoiseResult, LongTermLearningRunResult, LongTermLearningTaskMetrics,
 };
 pub use checkpoint::{Checkpoint, RestoredState};
 pub use config::LifConfig;
-pub use decision::{Candidate, Decision, DecisionPolicy, FeatureContribution};
+pub use decision::{
+    AbstentionReason, Candidate, Decision, DecisionEvaluator, DecisionMetrics, DecisionPolicy,
+    FeatureContribution,
+};
 pub use error::SimError;
 pub use evaluator::{RewardEvaluation, RewardEvaluator, RewardEvaluatorConfig, RewardMetrics};
 pub use language::{EncodedText, TextEncoder, Vocabulary, normalize_text, tokenize};
-pub use learning::{RewardModulatedStdpConfig, StdpConfig};
+pub use learning::{
+    ForgettingReport, LearningMemory, MemoryConflict, MemoryFeedbackWrite, MemoryInference,
+    MemoryRecall, ReplayReport, RewardModulatedStdpConfig, StdpConfig,
+};
 pub use memory::{MemoryRecord, MemoryStore, RecordId};
 pub use network::{LifNetwork, NetworkStep, Synapse};
 pub use neuron::lif::{LifNeuron, StepOutcome};

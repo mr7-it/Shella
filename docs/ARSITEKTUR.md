@@ -10,10 +10,10 @@ Paket Cargo, crate library, dan binari utama bernama `shella`. `src/lib.rs` meng
 - `learning/`: STDP lokal, eligibility trace, dan reward-modulated rule.
 - `network/`: orkestrasi sinkron, state-neuron restore validation, sinaps, delayed event, propagation, scheduler.
 - `evaluator/`: konfigurasi reward, metrik, dan penerapan reward transactional.
-- `benchmark/`: protokol conditioning dan statistik recall.
+- `benchmark/`: conditioning, interferensi/replay, continual-learning berkonflik dengan anggaran replay terukur, generalisasi held-out/noise, dan statistik recall.
 - `checkpoint/`: schema, integritas/checksum/file writer, save, dan restore.
 - `memory/`: schema record, mutasi/store, retrieval, dan persistence/integritas.
-- `decision/`: konfigurasi kandidat/kebijakan serta seleksi/skoring.
+- `decision/`: konfigurasi kandidat/kebijakan, seleksi/skoring, alasan abstain terstruktur, dan confusion metrics.
 - `language/`: normalisasi, tokenizer, vocabulary, dan encoder arus.
 - `sdk/`: input/output, engine, sesi, dan adapter persistence.
 
@@ -33,7 +33,7 @@ Benchmark conditioning memanggil `LifNetwork`, evaluator, dan reward learning pr
 
 `Checkpoint` menyimpan `LifRuntime` atau seluruh `LifNetwork` (parameter neuron, membran/refraktori, spike/clock, topologi/bobot, traces, pending events) dan evaluator opsional. JSON berversi memeriksa ukuran, checksum, dan invariants sebelum pemulihan.
 
-`MemoryStore` adalah store JSON terpisah dengan upsert, delete, get, ID stabil, prefix/tag retrieval, version/checksum check, dan write-temp/rename. Format menyimpan record JSON; tidak ada embedding atau associative retrieval semantik.
+`MemoryStore` adalah store JSON terpisah dengan upsert, delete, get, ID stabil, prefix/tag retrieval, version/checksum check, dan write-temp/rename. Advisory exclusive lock pada sidecar path mencegah lebih dari satu instance/proses membuka store yang sama untuk menulis; path dinormalisasi sebelum lock diambil. Format menyimpan record JSON; tidak ada embedding atau associative retrieval semantik.
 
 ## Keputusan, bahasa, dan aplikasi
 

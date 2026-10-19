@@ -15,6 +15,13 @@ fn path() -> PathBuf {
     ))
 }
 
+fn remove_store_files(file: &PathBuf) {
+    fs::remove_file(file).expect("database dihapus");
+    let mut lock_path = file.as_os_str().to_os_string();
+    lock_path.push(".lock");
+    fs::remove_file(PathBuf::from(lock_path)).expect("sidecar lock dihapus");
+}
+
 #[test]
 fn memory_crud_search_ids_stabil_dan_restart() {
     let file = path();
@@ -51,13 +58,32 @@ fn memory_crud_search_ids_stabil_dan_restart() {
         assert!(!reopened.delete("missing").expect("hapus idempotent"));
         assert_eq!(reopened.len(), 1);
     }
-    assert_eq!(
-        MemoryStore::open(&file)
-            .expect("delete bertahan setelah restart")
-            .len(),
-        1
-    );
-    fs::remove_file(file).expect("hapus fixture");
+    let final_store = MemoryStore::open(&file).expect("delete bertahan setelah restart");
+    assert_eq!(final_store.len(), 1);
+    drop(final_store);
+    remove_store_files(&file);
+}
+
+#[test]
+fn memory_store_menolak_writer_kedua_dan_melepas_lock_setelah_drop() {
+    let file = path();
+    let store = MemoryStore::open(&file).expect("writer pertama mendapat lock");
+    let alias = file
+        .parent()
+        .expect("direktori temp")
+        .join(".")
+        .join(file.file_name().expect("nama file"));
+    assert!(matches!(
+        MemoryStore::open(alias),
+        Err(SimError::Io {
+            operation: "kunci memori",
+            kind: std::io::ErrorKind::WouldBlock,
+        })
+    ));
+
+    drop(store);
+    MemoryStore::open(&file).expect("lock dilepas setelah store ditutup");
+    remove_store_files(&file);
 }
 
 #[test]
@@ -85,13 +111,14 @@ fn memory_menolak_input_invalid_tanpa_mutasi_dan_mendeteksi_korupsi() {
             ..
         })
     ));
-    fs::remove_file(file).expect("hapus fixture");
+    remove_store_files(&file);
 }
 
 #[test]
 fn memory_menolak_versi_schema_yang_tidak_dikenal() {
     let file = path();
-    let _store = MemoryStore::open(&file).expect("database baru");
+    let store = MemoryStore::open(&file).expect("database baru");
+    drop(store);
     let mut envelope: serde_json::Value =
         serde_json::from_slice(&fs::read(&file).expect("baca database")).expect("envelope JSON");
     envelope["format_version"] = json!(99);
@@ -107,7 +134,7 @@ fn memory_menolak_versi_schema_yang_tidak_dikenal() {
             version: 99
         })
     ));
-    fs::remove_file(file).expect("hapus fixture");
+    remove_store_files(&file);
 }
 
 #[test]
@@ -127,6 +154,44 @@ fn memory_store_child_process_reopens() {
             &["child-process".to_owned()],
         )
         .expect("update dari proses baru");
+}
+
+#[test]
+fn memory_store_child_writer_ditolak() {
+    let Ok(file) = std::env::var("SHELLA_MEMORY_LOCK_TEST") else {
+        return;
+    };
+    assert!(matches!(
+        MemoryStore::open(file),
+        Err(SimError::Io {
+            operation: "kunci memori",
+            kind: std::io::ErrorKind::WouldBlock,
+        })
+    ));
+}
+
+#[test]
+fn memory_store_lock_mencegah_writer_dari_proses_lain() {
+    let file = path();
+    let store = MemoryStore::open(&file).expect("writer utama mendapat lock");
+    let child = Command::new(std::env::current_exe().expect("test executable"))
+        .args([
+            "--exact",
+            "memory_store_child_writer_ditolak",
+            "--nocapture",
+        ])
+        .env("SHELLA_MEMORY_LOCK_TEST", &file)
+        .output()
+        .expect("proses writer kedua berjalan");
+    assert!(
+        child.status.success(),
+        "writer child tidak ditolak: {}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    drop(store);
+    let reopened = MemoryStore::open(&file).expect("lock dilepas setelah writer tutup");
+    drop(reopened);
+    remove_store_files(&file);
 }
 
 #[test]
@@ -159,5 +224,6 @@ fn memory_store_survives_real_process_restart_and_new_write() {
     assert_eq!(record.id(), id);
     assert_eq!(record.value(), &json!({"counter":2}));
     assert_eq!(record.tags(), &["child-process"]);
-    fs::remove_file(file).expect("hapus fixture");
+    drop(reopened);
+    remove_store_files(&file);
 }

@@ -3,31 +3,58 @@ use super::{
     record::{MemoryRecord, RecordId, StoreData},
 };
 use crate::SimError;
+use fs2::FileExt;
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
+    fs::{File, OpenOptions},
     path::{Path, PathBuf},
 };
 
-/// Database file-backed satu proses/satu penulis.
+/// Database file-backed dengan satu penulis lintas proses.
 ///
 /// Setiap mutasi menulis snapshot baru ke file sementara, `sync_all`, lalu `rename`;
-/// state dalam memori baru di-commit setelah persist berhasil. Beberapa writer proses
-/// paralel pada path yang sama tidak didukung. Penghapusan hanya terjadi saat `delete`;
-/// retensi otomatis tidak diterapkan.
+/// state dalam memori baru di-commit setelah persist berhasil. Lock advisory pada
+/// sidecar dipertahankan selama store terbuka; proses lain yang membuka path sama
+/// menerima `WouldBlock`. Penghapusan hanya terjadi saat `delete`; retensi otomatis
+/// tidak diterapkan.
 #[derive(Debug)]
 pub struct MemoryStore {
     pub(super) path: PathBuf,
     pub(super) data: StoreData,
+    _lock_file: File,
 }
 
 impl MemoryStore {
-    /// Membuka database lama atau membuat database kosong pada path yang diberikan.
+    /// Membuka database eksklusif atau membuat database kosong pada path yang diberikan.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SimError> {
-        let path = path.as_ref().to_path_buf();
+        let path = normalize_path(path.as_ref())?;
+        let mut lock_path = path.as_os_str().to_os_string();
+        lock_path.push(".lock");
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(PathBuf::from(lock_path))
+            .map_err(|error| SimError::Io {
+                operation: "buka lock memori",
+                kind: error.kind(),
+            })?;
+        lock_file
+            .try_lock_exclusive()
+            .map_err(|error| SimError::Io {
+                operation: "kunci memori",
+                kind: error.kind(),
+            })?;
+
         if path.exists() {
             let data = persistence::read_store(&path)?;
-            Ok(Self { path, data })
+            Ok(Self {
+                path,
+                data,
+                _lock_file: lock_file,
+            })
         } else {
             let data = StoreData {
                 format_version: FORMAT_VERSION,
@@ -35,7 +62,11 @@ impl MemoryStore {
                 records: BTreeMap::new(),
             };
             persistence::persist_store(&path, &data)?;
-            Ok(Self { path, data })
+            Ok(Self {
+                path,
+                data,
+                _lock_file: lock_file,
+            })
         }
     }
 
@@ -89,4 +120,30 @@ impl MemoryStore {
         self.data = next;
         Ok(())
     }
+}
+
+impl Drop for MemoryStore {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self._lock_file);
+    }
+}
+
+fn normalize_path(path: &Path) -> Result<PathBuf, SimError> {
+    let resolved = if path.exists() {
+        path.canonicalize()
+    } else {
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let name = path.file_name().ok_or(SimError::InvalidInput {
+            parameter: "memory_path",
+            reason: "harus menunjuk ke nama file",
+        })?;
+        parent.canonicalize().map(|parent| parent.join(name))
+    };
+    resolved.map_err(|error| SimError::Io {
+        operation: "normalisasi path memori",
+        kind: error.kind(),
+    })
 }

@@ -8,14 +8,14 @@
 - **Pembelajaran:** STDP pair-based, eligibility trace, reward/penalti signed, batas bobot, dan evaluator otomatis yang membaca spike output aktual.
 - **Checkpoint:** format JSON berversi untuk runtime tunggal atau state jaringan lengkap, evaluator opsional, checksum integritas, validasi invariants, dan penulisan melalui file sementara/rename.
 - **Memori persisten:** upsert dan CRUD, ID stabil, baca berdasarkan ID/kunci, pencarian prefix/tag, validasi ukuran/schema/checksum, serta pemulihan setelah proses dimulai ulang.
-- **Keputusan:** skor fitur linear, jejak kontribusi, tie-break stabil, dan abstain berdasarkan ambang. Skor/margin bukan probabilitas atau confidence terkalibrasi.
+- **Keputusan:** skor fitur linear, jejak kontribusi, tie-break stabil, abstain berdasarkan ambang, dan evaluator TP/FP/FN serta alasan abstain. Skor/margin bukan probabilitas atau confidence terkalibrasi.
 - **Pipeline teks dasar:** normalisasi Unicode lowercase, tokenisasi berbasis aturan, vocabulary deterministik dari korpus, ID token, dan proyeksi bag-of-token ke arus jaringan.
 - **SDK:** `Engine`/`Session` untuk input arus atau teks, output bertipe, evaluator aksi, decision policy, memory, dan checkpoint jaringan.
-- **Evaluasi/benchmark:** conditioning dan continual-learning multi-seed dengan kontrol tanpa update bobot, ditambah timing jaringan multi-skala, checkpoint, dan pencarian memori.
+- **Evaluasi/benchmark:** conditioning, interferensi/replay, continual-learning dengan konflik konteks, budget replay terukur, noise, split validation/test, dan confusion metrics lintas inisialisasi, ditambah benchmark pola komposisional serta timing jaringan.
 
 ## Keterbatasan yang disengaja
 
-Pipeline teks **bukan** model semantik, pemahaman bahasa, generator, decoder, subword tokenizer, atau embedding. Proyeksi `token_id % jumlah_neuron` dapat mengalami collision. Decision engine hanya menghitung fitur yang diberikan aplikasi; tidak ada probabilitas/kalibrasi. Memori adalah store lokal satu-penulis tanpa lock lintas proses, enkripsi, TTL, atau pencarian semantik. Checksum FNV-1a hanya mendeteksi kerusakan tak disengaja, bukan autentikasi. SDK sinkron dalam proses, bukan HTTP/RPC server. Benchmark mengukur perilaku protokol tetap pada mesin pengujian dan tidak membuktikan generalisasi, performa aplikasi, ataupun efisiensi energi.
+Pipeline teks **bukan** model semantik, pemahaman bahasa, generator, decoder, subword tokenizer, atau embedding. Proyeksi `token_id % jumlah_neuron` dapat mengalami collision. Decision engine hanya menghitung fitur yang diberikan aplikasi; tidak ada probabilitas/kalibrasi. Memori menegakkan satu penulis lintas proses dengan advisory sidecar lock, tetapi tidak memiliki enkripsi, TTL, atau pencarian semantik. Checksum FNV-1a hanya mendeteksi kerusakan tak disengaja, bukan autentikasi. SDK sinkron dalam proses, bukan HTTP/RPC server. Benchmark mengukur perilaku protokol tetap pada mesin pengujian dan tidak membuktikan generalisasi, performa aplikasi, ataupun efisiensi energi.
 
 ## Memulai
 
@@ -23,6 +23,9 @@ Prasyarat: Rust 1.85 atau lebih baru (MSRV di `Cargo.toml` adalah 1.85; edition 
 
 ```sh
 cargo run --release --locked
+cargo run --example interference --locked
+cargo run --example generalization --locked
+cargo run --example milestone9_continual --release --locked
 cargo build --release --lib --locked
 cargo test --all-targets --locked
 cargo clippy --all-targets --all-features --locked -- -D warnings
@@ -30,7 +33,7 @@ cargo bench --bench learning --locked
 cargo bench --bench system --locked
 ```
 
-Dalam proyek Rust lain, tambahkan dependensi bernama `shella`, lalu impor API dari crate `shella`. Contoh integrasi ada di [Panduan API](docs/API.md) dan [SDK](docs/SDK.md). Dependency langsung runtime hanya `serde` dan `serde_json`; versi serta dependency transitif dikunci di `Cargo.lock`.
+Dalam proyek Rust lain, tambahkan dependensi bernama `shella`, lalu impor API dari crate `shella`. Contoh integrasi ada di [Panduan API](docs/API.md) dan [SDK](docs/SDK.md). Dependency langsung runtime adalah `fs2`, `serde`, dan `serde_json`; versi serta dependency transitif dikunci di `Cargo.lock`.
 
 ## Peta dokumentasi
 

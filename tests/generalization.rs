@@ -1,6 +1,6 @@
 use shella::{
-    LifConfig, LifNetwork, RewardEvaluator, RewardEvaluatorConfig, RewardModulatedStdpConfig,
-    StdpConfig, Synapse,
+    GeneralizationBenchmarkConfig, LifConfig, LifNetwork, RewardEvaluator, RewardEvaluatorConfig,
+    RewardModulatedStdpConfig, StdpConfig, Synapse,
 };
 
 const ACTION: usize = 3;
@@ -119,4 +119,64 @@ fn dapat_mempelajari_asosiasi_baru_setelah_pola_awal() {
     assert!(online_learning.synapses()[0].weight_na() > 0.0);
     assert_eq!(online_learning.synapses()[1].weight_na(), 0.0);
     assert!(online_learning.synapses()[2].weight_na() > 0.0);
+}
+
+#[test]
+fn pola_gabungan_held_out_bertahan_pada_noise_rendah_dan_mengungguli_baseline() {
+    let config = GeneralizationBenchmarkConfig::new(vec![17, 31], 2, 32, 12)
+        .expect("konfigurasi generalization valid");
+    let result = config.run().expect("benchmark generalization berjalan");
+
+    for noise in config.noise_levels_na() {
+        println!(
+            "noise={noise:.0} nA accuracy={:?} fp_rate={:?} fn_rate={:?} abstain={:?}",
+            result.mean_trained_accuracy(*noise),
+            result.mean_false_positive_rate(*noise),
+            result.mean_false_negative_rate(*noise),
+            result.mean_abstention_rate(*noise),
+        );
+    }
+    assert_eq!(result.runs().len(), 4);
+    assert!(result.mean_baseline_accuracy(0.0).unwrap() < 1.0);
+    assert!(
+        result.mean_baseline_accuracy(0.0).unwrap() < result.mean_trained_accuracy(0.0).unwrap()
+    );
+    let fingerprints: std::collections::BTreeSet<_> = result
+        .runs()
+        .iter()
+        .filter(|run| run.task_variant() == 0)
+        .map(|run| run.initialization_fingerprint())
+        .collect();
+    assert_eq!(fingerprints.len(), config.seeds().len());
+    for run in result.runs() {
+        for condition in run.trained() {
+            assert_eq!(condition.metrics().samples(), 36);
+            assert_eq!(condition.metrics().positive_samples(), 24);
+            assert_eq!(condition.metrics().negative_samples(), 12);
+        }
+    }
+    assert!(result.mean_trained_accuracy(0.0).unwrap() >= 0.9);
+    assert!(result.mean_trained_accuracy(20.0).unwrap() >= 0.75);
+    assert!(result.mean_trained_accuracy(60.0).unwrap() < 1.0);
+    assert!(result.mean_false_positive_rate(60.0).unwrap() > 0.0);
+}
+
+#[test]
+fn benchmark_generalization_multi_seed_deterministik() {
+    let config =
+        GeneralizationBenchmarkConfig::new(vec![17, 31], 2, 8, 6).expect("konfigurasi valid");
+    assert_eq!(
+        config.run().expect("run pertama"),
+        config.run().expect("run kedua")
+    );
+}
+
+#[test]
+fn benchmark_generalization_menolak_konfigurasi_tidak_valid() {
+    assert!(GeneralizationBenchmarkConfig::new(Vec::new(), 1, 1, 1).is_err());
+    assert!(GeneralizationBenchmarkConfig::new(vec![1], 0, 1, 1).is_err());
+    assert!(GeneralizationBenchmarkConfig::new(vec![1], 5, 1, 1).is_err());
+    assert!(GeneralizationBenchmarkConfig::new(vec![1], 1, 0, 1).is_err());
+    assert!(GeneralizationBenchmarkConfig::new(vec![1], 1, 1, 0).is_err());
+    assert!(GeneralizationBenchmarkConfig::new(vec![1, 1], 1, 1, 1).is_err());
 }

@@ -57,3 +57,52 @@ Hasil final pada kelima seed: baseline test **0/8 (0%)**, test akhir **8/8 (100%
 Tugas ini sintetis, deterministik, dan kecil. Split hanya menahan amplitudo cue, bukan kelas/struktur semantik yang berbeda. Seed hanya mengubah urutan training; bukan variasi inisialisasi, data, atau noise. Forgetting nol berlaku untuk empat pola dengan cue pembeda dan bobot cue umum yang dibatasi; hasil ini tidak membuktikan pencegahan catastrophic forgetting untuk pemetaan konflik atau distribusi lain. `training_reward` teacher-forced tidak menggantikan recall tanpa teacher.
 
 Jalankan ulang dengan `cargo run --example milestone6_continual --locked`. Hasil tersebut merupakan metrik perilaku jaringan, bukan klaim pemahaman bahasa atau benchmark kecerdasan.
+
+## Generalisasi komposisional dan noise Milestone 8
+
+`GeneralizationBenchmarkConfig::standard()` menjalankan 8 inisialisasi bobot non-nol × 4 pemetaan fitur-ke-kelas, atau 32 run paired. Setiap jaringan melatih empat fitur satu per satu dengan teacher dan reward-modulated STDP. Evaluasi positif memakai pasangan fitur sekelas; kombinasi pasangan ini tidak pernah disajikan sebagai pola training. Amplitudo train berbeda per variasi (90/100/110/120 nA), sedangkan evaluasi memakai amplitudo ±10 nA dari nilai train. Tiap tingkat noise menguji 24 sampel positif dan 12 pola kosong, dengan urutan noise deterministik yang sama untuk baseline dan jaringan terlatih.
+
+Noise seragam signed ditambahkan pada kanal fitur lalu arus dipotong minimum nol. Jadi noise pada fitur tidak aktif menjadi arus gangguan nonnegatif; ini bukan white noise temporal atau noise pada bobot. Pola kosong dengan noise mengukur false positive; pola gabungan held-out mengukur false negative, false positive multiclass, dan abstain (tidak ada neuron aksi yang spike).
+
+Pengukuran standar aktual (akurasi baseline/terlatih, lalu FPR/FNR/abstain jaringan terlatih):
+
+| Noise (nA) | Baseline accuracy | Trained accuracy | FPR | FNR | Abstain |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 0.333 | 1.000 | 0.000 | 0.000 | 0.333 |
+| 10 | 0.333 | 1.000 | 0.000 | 0.000 | 0.333 |
+| 20 | 0.333 | 1.000 | 0.000 | 0.000 | 0.333 |
+| 40 | 0.333 | 0.997 | 0.000 | 0.005 | 0.336 |
+| 60 | 0.333 | 0.873 | 0.229 | 0.076 | 0.269 |
+
+Jalankan dengan `cargo run --example generalization --locked`; regression test ada di `tests/generalization.rs`. Hasil mendukung generalisasi ke kombinasi fitur sekelas yang belum dilatih untuk tugas sintetis ini. Empat pemetaan dan delapan seed tetap deterministik, bukan sampel populasi acak. Noise dibangkitkan perangkat PRNG lokal, tidak memodelkan sensor/lingkungan tertentu. Keberhasilan pada pola komposisional ini tidak menunjukkan generalisasi bahasa atau tugas dunia nyata.
+
+## Continual learning berkonflik Milestone 9
+
+`ContinualReplayBenchmarkConfig::standard()` memasangkan 8 inisialisasi bobot × 4 pemetaan Task A, total 32 run. Empat fitur dilatih ke dua kelas pada Task A; Task B membalik label setiap fitur yang sama, dengan context neuron berbeda sebagai sinyal task. Jaringan memakai hidden LIF conjunction unit yang shared untuk fitur dan unit konteks task; hidden-to-action connections memakai STDP reward-modulated. Buffer replay berisi contoh Task A aktual, termasuk contoh diam context-only.
+
+Semua metode memakai 64 epoch Task A dan anggaran fase B setara: kontrol menyajikan Task B tiga kali; replay menyajikan Task B dua kali dan memutar Task A satu kali. Standard budget **1.280 presentasi / 29.440 langkah jaringan per metode dan run**. Bobot awal non-nol diturunkan dari seed; tiap pasangan metode dimulai dari salinan bobot/state yang sama. Validation memakai amplitudo train ±5 nA dan noise 10 nA. Setelah kalibrasi hanya pada validation, test final dibekukan pada amplitudo train ±17 nA dan noise 30/50/70 nA; setiap task memiliki 32 positif dan 40 negatif (context-only + feature-only). Validation dan test tidak digunakan sebagai data teacher. Noise stream dipasangkan antarmetode.
+
+Hasil release aktual dirata-ratakan atas 32 run (8 seed × 4 task mapping). Metrik test di bawah memakai split final noise 30 nA; FPR dihitung pada pola negatif, FNR pada pola positif, dan abstain pada semua sampel.
+
+| Metode/tahap | Task | Accuracy | FP/run | FN/run | FPR | FNR | Abstain |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Sebelum belajar | A | 0.556 | 0.00 | 32.00 | 0.000 | 1.000 | 1.000 |
+| Sebelum belajar | B | 0.556 | 0.00 | 32.00 | 0.000 | 1.000 | 1.000 |
+| Setelah Task A | A | 0.743 | 16.38 | 8.38 | 0.253 | 0.262 | 0.444 |
+| Setelah Task A | B | 0.551 | 21.22 | 28.19 | 0.103 | 0.881 | 0.652 |
+| Tanpa replay | A | 0.597 | 27.31 | 18.88 | 0.253 | 0.590 | 0.438 |
+| Tanpa replay | B | 0.653 | 13.66 | 15.75 | 0.230 | 0.492 | 0.585 |
+| Replay 1/3 budget | A | 0.633 | 22.91 | 18.97 | 0.187 | 0.593 | 0.501 |
+| Replay 1/3 budget | B | 0.629 | 25.44 | 16.25 | 0.262 | 0.508 | 0.428 |
+
+Forgetting Task A rata-rata pada test **0.146 tanpa replay** dan **0.111 dengan replay** di noise 30 nA; simpangan baku antar-run **0.074** dan **0.073**. Pada noise 50 nA forgetting **0.082 vs 0.066**; pada noise 70 nA **0.049 vs 0.037**. Catastrophic-forgetting rate, didefinisikan sebagai penurunan Task A ≥0.5, adalah **0/32** pada kedua metode dan semua tingkat noise. Validation menunjukkan Task A **0.625 tanpa replay vs 0.708 dengan replay**, sedangkan Task B **0.691 vs 0.681**. Jadi replay memberikan perbaikan retensi parsial, tetapi Task A tetap turun dari 0.743 setelah Task A menjadi 0.633 pada test; Task B juga sedikit turun. Pada noise tinggi performa kedua metode memburuk, dan forgetting yang tampak lebih kecil tidak berarti robustness meningkat. Ini bukan pencegahan forgetting sempurna.
+
+Runner mengeluarkan metrik per seed × varian × split × task × noise: `cargo run --release --example milestone9_continual --locked`. Regression test memeriksa penguasaan Task A sebelum fase B, budget seimbang, split sample, fingerprint unik, dan peningkatan rerata validation Task A serta dua-task replay. Empat mapping dan delapan seed adalah protokol deterministik kecil; pola dan noise sintetis, sehingga hasil tidak membuktikan continual learning umum.
+
+## Interferensi tugas dan replay
+
+`InterferenceBenchmarkConfig::standard()` menjalankan 8 inisialisasi berbobot deterministik × 4 variasi tugas (32 pasangan). Bobot awal dipilih dari rentang non-nol berdasarkan seed; variasi mengubah konteks cue, label, dan amplitudo train (90/100/110/120 nA), sedangkan evaluasi memakai amplitudo berdekatan yang tidak dipakai saat training. Setiap pasangan melatih tugas lama, mengukur recall, lalu membandingkan dua salinan state yang sama: kontrol belajar tugas baru tanpa replay; perlakuan menyisipkan satu contoh tugas lama sesudah setiap contoh baru. Kedua jalur memakai jumlah langkah simulasi sama.
+
+Hasil standar yang diukur: akurasi tugas lama sebelum fase kedua **100%**; setelah fase kedua rata-rata **50% tanpa replay** dan **100% dengan replay**. Forgetting rata-rata turun dari **0,5 ke 0,0**. Akurasi tugas baru rata-rata **50% pada kedua jalur**: separuh variasi mempunyai konteks berbeda dan kedua task tercapai 100%; separuh lainnya memakai cue yang identik dengan label yang berlawanan, sehingga pemetaan statis tidak dapat memenuhi kedua target sekaligus. Pada konflik cue-identik, replay mempertahankan asosiasi lama dan tugas baru gagal; tanpa replay tugas baru juga tidak tercapai konsisten dan asosiasi lama tergeser. Hasil ini menunjukkan tradeoff serta batas representasi, bukan bahwa replay menyelesaikan konflik yang tidak dapat dibedakan.
+
+Inisialisasi menggunakan PRNG deterministik lokal, bukan sumber RNG eksternal; variasi tugas mengubah struktur input/target tetapi tetap tugas sintetis kecil. Jalankan tabel per-run dengan `cargo run --example interference --locked`, atau tes reproducibility dengan `cargo test --test continual_learning --locked`. Ini bukan bukti generalisasi ke dataset atau tugas eksternal.
