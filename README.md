@@ -11,12 +11,21 @@
 - **Secure storage:** `SecureMemoryStore` dengan AES-256-GCM, nonce OS, signature Ed25519, dan transaksi read-modify-write dengan lock per mutasi untuk writer bergantian. Kunci dikelola aplikasi, tidak disimpan ke disk.
 - **Keputusan:** skor fitur linear, jejak kontribusi, tie-break stabil, abstain berdasarkan ambang, evaluator TP/FP/FN/FPR/FNR, `CalibrationEvaluator`, Platt scaling, dan isotonic regression. Skor/margin bukan probabilitas.
 - **Pipeline teks dasar:** normalisasi Unicode lowercase, tokenisasi berbasis aturan, vocabulary deterministik dari korpus, ID token, dan proyeksi bag-of-token ke arus jaringan.
+- **Library bahasa Indonesia:** API lexicon terversi dengan `WordID` persisten dan loader source-pinned untuk stopwords-id, UD Indonesian-PUD, NusaX (MT/sentiment/lexicon), serta IndoSum. Data asli dan notice lisensinya disimpan di `data/language/`; GSD/CSUI dan IndoNLI tetap tidak diaktifkan karena izin corpus belum terverifikasi.
 - **SDK:** `Engine`/`Session` untuk input arus atau teks, output bertipe, evaluator aksi, decision policy, memory, dan checkpoint jaringan.
+- **Reasoning:** `ReasoningEngine` memadukan context window terbatas, goal-directed retrieval, perhatian temporal dari timestamp absolut, memory consolidation/decay, deteksi kontradiksi dan asosiasi label berbukti, dekomposisi uncertainty, compute budget adaptif, replay, kalibrasi Platt ber-ID, serta checkpoint reasoning.
 - **Evaluasi/benchmark:** conditioning, interferensi/replay, continual-learning dengan konflik konteks, benchmark M10 12 seed × 4 varian × 16 repetisi dengan temporal ensemble dan adaptive fallback untuk noise 30/50/70 nA, split validation/test, confusion metrics, kalibrasi, timing jaringan, serta holdout UCI Iris nyata.
 
 ## Keterbatasan yang disengaja
 
-Pipeline teks **bukan** model semantik penuh, pemahaman bahasa, generator, decoder, atau subword tokenizer. `TextEmbedding` adalah hashing lexical deterministik dan dapat mengalami collision. Proyeksi `token_id % jumlah_neuron` juga dapat collision. `MemoryStore` lama tetap JSON single-writer; gunakan `SecureMemoryStore` untuk enkripsi/signature dan writer bergantian. Rotasi kunci, backup, serta key management tetap tanggung jawab aplikasi. Benchmark mengukur perilaku protokol sintetis dan tidak membuktikan generalisasi, performa aplikasi, ataupun efisiensi energi.
+`LanguageNetwork` menyediakan ID kata/subword/neuron/sinaps stabil, representasi kata terdistribusi, koneksi sinaptik aktual, dan checkpoint bersama jaringan. Lookup vocabulary memakai hashbrown SwissTable, tetapi nilai hash tidak dipakai sebagai ID. `TextEncoder` lama tetap memakai proyeksi modulo untuk kompatibilitas dan dapat mengalami collision. Pipeline teks bukan model semantik penuh, pemahaman bahasa, generator, atau decoder; `TextEmbedding` tetap hashing lexical dan dapat collision. `MemoryStore` lama tetap JSON single-writer; gunakan `SecureMemoryStore` untuk enkripsi/signature dan writer bergantian. Rotasi kunci, backup, serta key management tetap tanggung jawab aplikasi. Benchmark mengukur perilaku protokol sintetis dan tidak membuktikan generalisasi, performa aplikasi, ataupun efisiensi energi.
+
+`ReasoningEngine::confidence()` adalah skor heuristik; bukan probabilitas.
+`calibrated_confidence()` hanya tersedia setelah Platt fit menggunakan ID validation
+dan ID evaluation non-overlap, dengan Brier/MAE diukur pada data evaluation.
+Reasoning checkpoint mengikat state network/context/kalibrator ke fingerprint
+LearningMemory terpisah dan menolak restore bila fingerprint berbeda. Asosiasi fitur
+dan label hanyalah ko-occurence terukur, bukan bukti kausal intervensional.
 
 ## Memulai
 
@@ -36,7 +45,7 @@ cargo bench --bench learning --locked
 cargo bench --bench system --locked
 ```
 
-Dalam proyek Rust lain, tambahkan dependensi bernama `shella`, lalu impor API dari crate `shella`. Contoh integrasi ada di [Panduan API](docs/API.md) dan [SDK](docs/SDK.md). Dependency langsung runtime adalah `fs2`, `serde`, dan `serde_json`; versi serta dependency transitif dikunci di `Cargo.lock`.
+Dalam proyek Rust lain, tambahkan dependensi bernama `shella`, lalu impor API dari crate `shella`. Contoh integrasi ada di [Panduan API](docs/API.md) dan [SDK](docs/SDK.md). Dependency langsung dan transitif tercatat di `Cargo.toml` serta `Cargo.lock`.
 
 ## Peta dokumentasi
 

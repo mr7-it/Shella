@@ -1,4 +1,5 @@
 use crate::SimError;
+use unicode_normalization::UnicodeNormalization;
 
 const MAX_TEXT_BYTES: usize = 1_048_576;
 
@@ -16,9 +17,14 @@ pub fn normalize_text(text: &str) -> Result<String, SimError> {
             reason: "teks tidak boleh memuat NUL",
         });
     }
-    Ok(text
+    let normalized: String = text
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-        .to_lowercase())
+        .nfc()
+        .collect::<String>()
+        .to_lowercase()
+        .nfc()
+        .collect();
+    Ok(normalized)
 }

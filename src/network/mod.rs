@@ -1,6 +1,7 @@
 use crate::{
     config::LifConfig,
     error::SimError,
+    identity::{NeuronID, SynapseID},
     learning::{RewardModulatedStdpConfig, StdpConfig, StdpTrace},
     neuron::lif::{LifNeuron, LifStepPlan, StepOutcome},
 };
@@ -55,12 +56,22 @@ struct PreparedLearning {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LifNetwork {
     neurons: Vec<LifNeuron>,
+    #[serde(default)]
+    neuron_ids: Vec<NeuronID>,
     synapses: Vec<Synapse>,
+    #[serde(default)]
+    synapse_ids: Vec<SynapseID>,
+    #[serde(default = "first_synapse_id")]
+    next_synapse_id: u64,
     pending_inputs: Vec<DelayedInput>,
     completed_steps: u64,
     stdp_config: Option<StdpConfig>,
     reward_config: Option<RewardModulatedStdpConfig>,
     stdp_traces: Vec<StdpTrace>,
+}
+
+const fn first_synapse_id() -> u64 {
+    1
 }
 
 impl LifNetwork {
@@ -79,7 +90,7 @@ impl LifNetwork {
         for _ in 0..neuron_count {
             neurons.push(LifNeuron::new(config)?);
         }
-        Ok(Self::from_neurons(neurons))
+        Self::from_neurons(neurons)
     }
 
     /// Membuat jaringan dengan parameter membran berbeda untuk tiap neuron.
@@ -107,23 +118,40 @@ impl LifNetwork {
             }
             neurons.push(LifNeuron::new(*config)?);
         }
-        Ok(Self::from_neurons(neurons))
+        Self::from_neurons(neurons)
     }
 
-    fn from_neurons(neurons: Vec<LifNeuron>) -> Self {
-        Self {
+    fn from_neurons(neurons: Vec<LifNeuron>) -> Result<Self, SimError> {
+        let mut neuron_ids = Vec::new();
+        neuron_ids
+            .try_reserve_exact(neurons.len())
+            .map_err(|_| SimError::AllocationFailed)?;
+        for index in 0..neurons.len() {
+            let value = u64::try_from(index)
+                .ok()
+                .and_then(|index| index.checked_add(1))
+                .ok_or(SimError::CounterOverflow {
+                    counter: "ID neuron",
+                })?;
+            neuron_ids.push(NeuronID::new(value));
+        }
+        Ok(Self {
             neurons,
+            neuron_ids,
             synapses: Vec::new(),
+            synapse_ids: Vec::new(),
+            next_synapse_id: first_synapse_id(),
             pending_inputs: Vec::new(),
             completed_steps: 0,
             stdp_config: None,
             reward_config: None,
             stdp_traces: Vec::new(),
-        }
+        })
     }
 
     /// Menambahkan koneksi berarah jika endpoint sah dan pasangan unik.
     pub fn add_synapse(&mut self, synapse: Synapse) -> Result<(), SimError> {
+        self.ensure_identity_state()?;
         if synapse.source >= self.neurons.len() || synapse.target >= self.neurons.len() {
             return Err(SimError::InvalidTopology {
                 reason: "indeks sumber atau tujuan berada di luar jumlah neuron",
@@ -142,12 +170,23 @@ impl LifNetwork {
         self.synapses
             .try_reserve(1)
             .map_err(|_| SimError::AllocationFailed)?;
+        self.synapse_ids
+            .try_reserve(1)
+            .map_err(|_| SimError::AllocationFailed)?;
+        let next_synapse_id =
+            self.next_synapse_id
+                .checked_add(1)
+                .ok_or(SimError::CounterOverflow {
+                    counter: "ID sinaps",
+                })?;
         if self.stdp_config.is_some() {
             self.stdp_traces
                 .try_reserve(1)
                 .map_err(|_| SimError::AllocationFailed)?;
         }
         self.synapses.push(synapse);
+        self.synapse_ids.push(SynapseID::new(self.next_synapse_id));
+        self.next_synapse_id = next_synapse_id;
         if self.stdp_config.is_some() {
             self.stdp_traces.push(StdpTrace::default());
         }
@@ -281,6 +320,31 @@ impl LifNetwork {
         self.synapses.len()
     }
 
+    /// ID stabil neuron berdasarkan indeks jaringan.
+    #[must_use]
+    pub fn neuron_id(&self, index: usize) -> Option<NeuronID> {
+        self.neuron_ids.get(index).copied().or_else(|| {
+            self.neurons
+                .get(index)
+                .and_then(|_| u64::try_from(index).ok())
+                .and_then(|index| index.checked_add(1))
+                .map(NeuronID::new)
+        })
+    }
+
+    /// Indeks neuron yang memiliki identitas tersebut.
+    #[must_use]
+    pub fn neuron_index(&self, id: NeuronID) -> Option<usize> {
+        self.neuron_ids
+            .iter()
+            .position(|candidate| *candidate == id)
+            .or_else(|| {
+                let index = id.get().checked_sub(1)?;
+                let index = usize::try_from(index).ok()?;
+                (self.neuron_ids.is_empty() && index < self.neurons.len()).then_some(index)
+            })
+    }
+
     /// Indeks langkah jaringan yang telah berhasil diselesaikan.
     #[must_use]
     pub const fn completed_steps(&self) -> u64 {
@@ -297,6 +361,32 @@ impl LifNetwork {
     #[must_use]
     pub fn synapses(&self) -> &[Synapse] {
         &self.synapses
+    }
+
+    /// ID stabil sinaps berdasarkan urutan penambahan.
+    #[must_use]
+    pub fn synapse_id(&self, index: usize) -> Option<SynapseID> {
+        self.synapse_ids.get(index).copied().or_else(|| {
+            self.synapses
+                .get(index)
+                .and_then(|_| u64::try_from(index).ok())
+                .and_then(|index| index.checked_add(1))
+                .map(SynapseID::new)
+        })
+    }
+
+    /// Akses sinaps berdasarkan identitas stabil.
+    #[must_use]
+    pub fn synapse_by_id(&self, id: SynapseID) -> Option<&Synapse> {
+        self.synapse_ids
+            .iter()
+            .position(|candidate| *candidate == id)
+            .or_else(|| {
+                let index = id.get().checked_sub(1)?;
+                let index = usize::try_from(index).ok()?;
+                (self.synapse_ids.is_empty() && index < self.synapses.len()).then_some(index)
+            })
+            .and_then(|index| self.synapses.get(index))
     }
 
     /// Jumlah peristiwa sinaptik yang masih menunggu waktu tiba.
@@ -425,6 +515,39 @@ impl LifNetwork {
 
     pub(crate) fn validate_restored_state(&self) -> Result<(), SimError> {
         validate_population(&self.neurons, self.completed_steps)?;
+        if (!self.neuron_ids.is_empty() && self.neuron_ids.len() != self.neurons.len())
+            || (!self.synapse_ids.is_empty() && self.synapse_ids.len() != self.synapses.len())
+        {
+            return Err(SimError::InvalidCheckpoint {
+                reason: "jumlah ID tidak cocok dengan populasi atau sinaps".to_owned(),
+            });
+        }
+        if self.neuron_ids.iter().any(|id| id.get() == 0)
+            || self
+                .neuron_ids
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != self.neuron_ids.len()
+            || self.synapse_ids.iter().any(|id| id.get() == 0)
+            || self
+                .synapse_ids
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != self.synapse_ids.len()
+            || self
+                .synapse_ids
+                .iter()
+                .any(|id| id.get() >= self.next_synapse_id)
+        {
+            return Err(SimError::InvalidCheckpoint {
+                reason: "identitas neuron/sinaps duplikat atau penghitung sinaps invalid"
+                    .to_owned(),
+            });
+        }
         for (index, synapse) in self.synapses.iter().enumerate() {
             Synapse::new(
                 synapse.source,
@@ -494,6 +617,61 @@ impl LifNetwork {
                     reason: "mode STDP, trace, dan sinaps tidak konsisten".to_owned(),
                 });
             }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn migrate_restored_identity_state(&mut self) -> Result<(), SimError> {
+        self.ensure_identity_state()?;
+        self.validate_restored_state()
+    }
+
+    fn ensure_identity_state(&mut self) -> Result<(), SimError> {
+        if self.neuron_ids.is_empty() {
+            let mut ids = Vec::new();
+            ids.try_reserve_exact(self.neurons.len())
+                .map_err(|_| SimError::AllocationFailed)?;
+            for index in 0..self.neurons.len() {
+                let id = u64::try_from(index)
+                    .ok()
+                    .and_then(|index| index.checked_add(1))
+                    .ok_or(SimError::CounterOverflow {
+                        counter: "ID neuron",
+                    })?;
+                ids.push(NeuronID::new(id));
+            }
+            self.neuron_ids = ids;
+        }
+        if self.neuron_ids.len() != self.neurons.len() {
+            return Err(SimError::InvalidTopology {
+                reason: "jumlah ID neuron tidak cocok dengan populasi",
+            });
+        }
+        if self.synapse_ids.is_empty() {
+            let mut ids = Vec::new();
+            ids.try_reserve_exact(self.synapses.len())
+                .map_err(|_| SimError::AllocationFailed)?;
+            for index in 0..self.synapses.len() {
+                let id = u64::try_from(index)
+                    .ok()
+                    .and_then(|index| index.checked_add(1))
+                    .ok_or(SimError::CounterOverflow {
+                        counter: "ID sinaps",
+                    })?;
+                ids.push(SynapseID::new(id));
+            }
+            self.synapse_ids = ids;
+            self.next_synapse_id = u64::try_from(self.synapses.len())
+                .ok()
+                .and_then(|count| count.checked_add(1))
+                .ok_or(SimError::CounterOverflow {
+                    counter: "ID sinaps",
+                })?;
+        }
+        if self.synapse_ids.len() != self.synapses.len() {
+            return Err(SimError::InvalidTopology {
+                reason: "jumlah ID sinaps tidak cocok dengan koneksi",
+            });
         }
         Ok(())
     }

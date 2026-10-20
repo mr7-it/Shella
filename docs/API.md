@@ -56,11 +56,162 @@ SdkInput::Text {
 
 `Session::decide(&[Candidate])` mengembalikan skor linear, kontribusi fitur, margin, ID terpilih, dan alasan atau keputusan abstain. Skor/margin bukan confidence probabilistik. `Session::remember(key, serde_json::Value, tags)` melakukan upsert pada `MemoryStore` file-backed.
 
+Untuk identitas dan koneksi bahasa-neuron yang persisten, `Vocabulary::word_id`
+mengembalikan `WordID` yang disimpan di vocabulary, sementara lookup token memakai
+hashbrown SwissTable (hash hanya untuk lookup, bukan nilai ID). `LanguageNetwork`
+mengambil ownership `LifNetwork` dan vocabulary, membagi kata ke subword ber-ID,
+serta mengikat kata ke satu atau lebih `NeuronID`:
+
+```rust
+use shella::{LanguageNetwork, LifConfig, LifNetwork, Vocabulary};
+
+let vocabulary = Vocabulary::fit(["alpha beta"], 1, 16)?;
+let network = LifNetwork::new(
+    LifConfig::new(1.0, 10.0, 1.0, -65.0, -70.0, -60.0, 0),
+    4,
+)?;
+let mut language = LanguageNetwork::new(network, vocabulary)?;
+let alpha = language.vocabulary().word_id("alpha");
+let representation = [
+    language.network().neuron_id(0).expect("neuron exists"),
+    language.network().neuron_id(1).expect("neuron exists"),
+];
+language.bind_word(alpha, &representation)?;
+let currents = language.encode_currents("alpha", 20.0)?;
+assert_eq!(currents, [10.0, 10.0, 0.0, 0.0]);
+# Ok::<(), shella::SimError>(())
+```
+
+`connect_words` membuat koneksi all-to-all antar representasi dengan `SynapseID`;
+sinaps tersebut ikut propagasi dan STDP `LifNetwork`. `step_text` memproyeksikan
+teks dan menjalankan satu langkah jaringan. `Checkpoint::save_language_network` /
+`restore_language_network` menyimpan dan memulihkan vocabulary, ID kata/subword,
+binding neuron, relasi sinaps, bobot, trace learning, dan state jaringan dalam satu
+checkpoint checksummed. `ReasoningEngine::reason_text` mengubah teks menjadi arus
+pada representasi neuron yang kompatibel, lalu melewati reasoning dan retrieval
+memory biasa. Ini adalah representasi terikat eksplisit, bukan embedding semantik.
+
 Untuk pembelajaran jangka panjang, `LearningMemory::open(path)` memulihkan pengalaman persisten. `record_feedback` menyimpan hasil evaluasi, `recall_similar` melakukan cosine retrieval, `infer_with_memory` menginjeksikan support ke neuron aksi LIF, `replay_relevant` menjalankan ulang pengalaman melalui reward-modulated STDP, `find_conflicts` mendeteksi label berbeda pada fitur mirip, `consolidate` melindungi asosiasi penting, dan `decay_irrelevant` melakukan pelupaan terkontrol. Retrieval score bukan probabilitas.
 
 `TextEmbedding::from_text` membuat embedding hashing token/character n-gram deterministik. `MemoryStore::put_with_embedding` dan `search_embedding` menyediakan retrieval embedding; `LearningMemory::record_text_feedback` dan `recall_text_similar` menghubungkan embedding tersebut ke pengalaman pembelajaran. `MemoryStore::put_with_ttl` serta `purge_expired` menyediakan TTL otomatis.
 
+## Library kosakata Indonesia
+
+`IndonesianVocabulary` menyediakan wadah lexicon terversi dan tervalidasi.
+`LicenseRegistry::verified_sources()` mengizinkan stopwords-id, UD Indonesian-PUD,
+NusaX, IndoSum, dan Hunspell terdahulu hanya pada revisi/hash yang tercatat. Data
+stopwords, PUD, NusaX, dan IndoSum yang berlisensi dipisahkan di
+`data/language/`. GSD/CSUI tetap tidak aktif karena hak teks sumber belum
+dipastikan; IndoNLI tidak memiliki lisensi dataset yang terverifikasi; WordNet
+Bahasa pada URL terdahulu tidak tersedia. Lihat
+[`docs/DATASET_BAHASA_INDONESIA.md`](./DATASET_BAHASA_INDONESIA.md) untuk status,
+ukuran, sumber, serta batas penggunaan masing-masing.
+
+```rust
+use shella::{
+    IndonesianVocabulary, LexiconEntryInput, LexiconMetadata, LinguisticMetadata,
+    SourceProvenance,
+};
+
+let mut lexicon =
+    IndonesianVocabulary::new(LexiconMetadata::indonesian("my-import", "1"))?;
+let entry = LexiconEntryInput {
+    headword: "istilah".to_owned(),
+    sources: vec![SourceProvenance {
+        source_name: "Nama sumber yang diverifikasi aplikasi".to_owned(),
+        source_uri: "https://source.example/entry/identifier".to_owned(),
+        license: "Lisensi dan izin yang berlaku".to_owned(),
+        license_uri: "https://source.example/license".to_owned(),
+        source_entry_id: "identifier".to_owned(),
+    }],
+    linguistic: LinguisticMetadata::default(),
+};
+let word_id = lexicon.upsert(entry)?;
+assert_eq!(lexicon.lookup("ISTILAH")?.unwrap().word_id, word_id);
+# Ok::<(), shella::SimError>(())
+```
+
+Contoh di atas hanya menunjukkan bentuk API dan bukan sumber atau kosakata nyata.
+`upsert` mempertahankan ID saat kata diperbarui; `import_json` memvalidasi versi,
+metadata dataset, dan seluruh batch secara atomik. `to_json`/`from_json` mengelola
+representation JSON berversi, sedangkan `Checkpoint::save_indonesian_vocabulary`
+dan `restore_indonesian_vocabulary` menyimpan/memulihkan state dengan checksum
+serta atomic replace. Skema interoperabilitas JSON tersedia di
+[`schemas/indonesian-vocabulary-v1.schema.json`](../schemas/indonesian-vocabulary-v1.schema.json).
+Variasi ejaan merupakan alias lookup setelah normalisasi NFC.
+Definisi hanya diterima bila merujuk `source_entry_id` yang tercatat pada entri.
+`segment_unlisted` melakukan segmentasi karakter ortografis saja dan tidak
+menyatakan kata baru memiliki arti atau analisis morfologi tertentu.
+
+`into_language_network(network)` membawa vocabulary dan `WordID` ke
+`LanguageNetwork`; aplikasi mengikat ID kata ke neuron memakai `bind_word`.
+Tidak ada relasi neural otomatis dari definisi atau kelas kata.
+
+`DatasetLoader::load_ud_conllu`, `load_stopwords_json`,
+`load_nusax_mt_csv`, `load_nusax_sentiment_csv`, `load_nusax_lexicon_csv`,
+`load_indosum_archive`, dan `load_hunspell_files` adalah batas impor berkas lokal.
+Loader memeriksa hash sebelum parse. Stopwords dapat diterapkan ke input aktual
+melalui `LanguageNetwork`; PUD mempertahankan anotasi token/lemma/dependency;
+NusaX sentiment menyediakan tokenisasi dan evaluator caller-prediction pada split
+held-out; NusaX lexicon dapat mengintern token ke vocabulary neural; IndoSum
+memuat satu split JSONL dan menghitung token-level ROUGE-1. Tidak satu pun
+menyediakan model translation, sentiment, NLI, atau summarization terlatih.
+GSD/CSUI tetap ditolak registry. Hunspell menyediakan root dan analisis langsung
+satu aturan afiks, bukan seluruh perilaku mesin Hunspell. Anotasi dependency UD
+bukan relasi semantik.
+
 `infer_task_with_memory_adaptive` hanya menginjeksikan memory ketika similarity teratas melewati ambang validasi; bila tidak, jaringan berjalan tanpa injeksi. Benchmark M10 menggabungkan kebijakan ini dengan temporal voting lima observasi sensor noisy dan fallback pada noise ekstrem. Kebijakan fallback dipakai karena hasil eksperimen menunjukkan memori yang dipaksakan pada sinyal sangat bising dapat menurunkan akurasi.
+
+`ReasoningEngine::new(network, learning_memory, config)` menyediakan jalur reasoning
+iteratif terpisah dari SDK. `ReasoningConfig` menetapkan jumlah langkah (1..=1024),
+batas retrieval, arus memori, laju peluruhan temporal per detik, dan confidence minimum.
+`reason(context_id, currents, action_neurons)` menggunakan cosine retrieval per
+context, memberi bobot lebih pada record relevan yang lebih baru, menginjeksikan
+dukungan memori sebagai arus LIF, lalu melanjutkan propagasi jaringan selama beberapa
+langkah. `ReasoningResult` berisi trace tiap transisi, recall, bobot perhatian,
+dukungan aksi, uncertainty entropy, evidence strength, skor heuristik, dan aksi
+terpilih atau abstention. `ReasoningResult::confidence()` bukan probabilitas.
+Untuk confidence terkalibrasi, panggil
+`fit_confidence_calibration(validation_samples, evaluation_samples, iterations,
+learning_rate)`: Platt dilatih pada validation samples dengan outcome benar dan
+salah, lalu Brier/MAE dihitung hanya pada evaluation samples terpisah. Pemanggil
+wajib menjaga kedua split berbeda satu sama lain dan dari data pelatihan model utama.
+`calibrated_confidence()` bernilai `None` sebelum kalibrasi.
+
+`learn_from_feedback` menyimpan pengalaman melalui `LearningMemory::record_feedback`.
+Jika STDP aktif, input fitur dan spike pengajar dipresentasikan ke network; bobot
+diperbarui oleh STDP, dan reward signed diterapkan jika reward-modulated STDP aktif.
+Tanpa STDP, fungsi memakai update readout yang tersedia. Pembelajaran STDP berjalan
+pada salinan jaringan dan hasilnya dikomit hanya setelah penyimpanan feedback berhasil.
+Timestamp pengalaman Unix nanodetik dipersistenkan; record lama tanpa timestamp
+dimigrasikan saat dibuka, sedangkan timestamp kosong atau lebih dari lima detik di
+masa depan ditolak sebagai data korup. Setiap transisi LIF transactional, tetapi
+panggilan reasoning multi-langkah tidak membatalkan langkah terdahulu bila langkah
+selanjutnya gagal.
+
+Fitur reasoning tambahan:
+
+- `with_context_window(capacity)` mengaktifkan arus input dari beberapa pemrosesan
+  terakhir (maksimum 4096); context yang berganti mengosongkan jendela sebelumnya.
+- `reason_for_goal` menggabungkan input dan fitur tujuan untuk mengarahkan query
+  retrieval, tanpa mengubah input arus yang masuk ke jaringan.
+- `consolidate_memories` menggabungkan record fitur-mirip dengan task dan label sama;
+  label konflik tetap dipisah. `decay_memories` meluruhkan importance dari waktu
+  decay terakhir, dengan half-life yang diperpanjang hitungan penggunaan.
+- `causal_associations` menghitung ko-occurence fitur-label yang berulang; ini
+  bukan bukti sebab-akibat intervensional. `ReasoningResult::contradictions()` berisi
+  pasangan recall mirip yang menyimpan label berbeda.
+- `uncertainty_decomposition()` memisahkan entropy dukungan prediksi dari gap bukti.
+  `with_adaptive_compute(true)` memilih langkah 1..=batas `iterations` dari input,
+  entropy recall, dan rasio kontradiksi.
+- `replay_experiences` menjalankan pengalaman relevan melalui replay LIF/STDP.
+- `save_checkpoint`/`restore_checkpoint(path, learning_memory)` menyimpan state
+  reasoning, context, konfigurasi, kalibrator beserta provenance dan metrik. Memory
+  tetap file terpisah; restore memeriksa fingerprint record agar mismatch ditolak.
+
+Gunakan `fit_confidence_calibration_with_ids` dengan `CalibrationSample` untuk
+memastikan ID unik dan split validation/evaluation tidak overlap. API lama tanpa ID
+dipertahankan demi kompatibilitas; pemanggilnya tetap bertanggung jawab atas split.
 
 Untuk data sensitif, gunakan `SecureMemoryStore::open(path, encryption_key, signing_key)`. Payload dienkripsi AES-256-GCM dan ditandatangani Ed25519. Setiap `put` memperoleh lock transaksi, membaca snapshot terbaru, lalu melakukan atomic commit sehingga beberapa writer dapat bergantian tanpa lock sepanjang umur object. Kunci 32-byte harus dikelola di luar aplikasi dan tidak boleh ditulis ke repository.
 

@@ -1,7 +1,8 @@
 use crate::SimError;
+use serde::{Deserialize, Serialize};
 
 /// Kalibrator sigmoid Platt yang dilatih pada split validasi berlabel.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PlattCalibrator {
     slope: f64,
     intercept: f64,

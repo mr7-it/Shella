@@ -10,14 +10,17 @@ pub mod benchmark;
 pub mod checkpoint;
 pub mod config;
 pub mod decision;
+pub mod engine;
 pub mod error;
 pub mod evaluator;
+pub mod identity;
 pub mod knowledge;
 pub mod language;
 pub mod learning;
 pub mod memory;
 pub mod network;
 pub mod neuron;
+pub mod reasoning;
 pub mod runtime;
 pub mod sdk;
 
@@ -39,22 +42,40 @@ pub use decision::{
     DecisionEvaluator, DecisionMetrics, DecisionPolicy, FeatureContribution, IsotonicCalibrator,
     PlattCalibrator,
 };
+pub use engine::{
+    LearningOutcome, MemoryAttention, ReasoningConfig, ReasoningEngine, ReasoningResult,
+    ReasoningStep,
+};
 pub use error::SimError;
 pub use evaluator::{RewardEvaluation, RewardEvaluator, RewardEvaluatorConfig, RewardMetrics};
+pub use identity::{NeuronID, SubwordID, SynapseID, WordID};
 pub use knowledge::{
     CalibrationParameters, ClassKnowledge, ClassKnowledgeInference, ClassKnowledgeModel,
     ClassPrediction, Exemplar, ExemplarPolicy, ExemplarReason, FeatureDefinition, FeatureMetadata,
     FeatureScaler, FeatureStatistics, FeatureType, IrisFeatures, LegacyPrototypeSnapshot,
     ModelApprovalStatus, Prototype, PrototypeCandidateScore, SCORING_VERSION, feature_definitions,
 };
-pub use language::{EncodedText, TextEncoder, Vocabulary, normalize_text, tokenize};
+pub use language::{
+    DatasetId, DatasetLoadReport, DatasetLoader, DatasetProvenance, EncodedText, HunspellAffixKind,
+    HunspellAffixRule, HunspellAnalysis, HunspellRoot, IndoSumArticle, IndoSumCorpus,
+    IndoSumPartition, IndoSumRouge1, IndonesianVocabulary, LanguageNetwork, LexicalAnalysis,
+    LexicalConnection, LexicalRelation, LexicalRelationType, LexiconEntry, LexiconEntryInput,
+    LexiconMetadata, LicenseRegistry, LinguisticMetadata, NusaXLexicon, NusaXLexiconEntry,
+    NusaXParallelCorpus, NusaXParallelSentence, NusaXSentimentCorpus, NusaXSentimentExample,
+    NusaXSentimentLabel, NusaXSentimentMetrics, NusaXSplit, NusaXWordPair, SourceProvenance,
+    StopwordSet, TextEncoder, Vocabulary, normalize_text, tokenize,
+};
 pub use learning::{
-    ForgettingReport, LearningMemory, MemoryConflict, MemoryFeedbackWrite, MemoryInference,
-    MemoryRecall, ReplayReport, RewardModulatedStdpConfig, StdpConfig,
+    ConsolidationReport, ForgettingReport, LearningMemory, MemoryConflict, MemoryFeedbackWrite,
+    MemoryInference, MemoryRecall, ReplayReport, RewardModulatedStdpConfig, StdpConfig,
 };
 pub use memory::{MemoryRecord, MemoryStore, RecordId, SecureMemoryStore, TextEmbedding};
 pub use network::{LifNetwork, NetworkStep, Synapse};
 pub use neuron::lif::{LifNeuron, StepOutcome};
+pub use reasoning::{
+    CalibrationSample, CalibrationState, CausalAssociation, ContextFrame, EvidenceContradiction,
+    ReasoningCheckpoint, UncertaintyDecomposition,
+};
 pub use runtime::{LifRuntime, SimulationClock};
 pub use sdk::{
     Engine, Input as SdkInput, InputKind as SdkInputKind, Output as SdkOutput,

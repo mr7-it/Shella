@@ -3,6 +3,54 @@ use crate::{ClassKnowledgeModel, LifNetwork, LifRuntime, RewardEvaluator, SimErr
 use std::path::Path;
 
 impl Checkpoint {
+    /// Menyimpan lexicon Indonesia tervalidasi melalui envelope checksummed atomik.
+    pub fn save_indonesian_vocabulary(
+        path: impl AsRef<Path>,
+        state: &crate::IndonesianVocabulary,
+    ) -> Result<(), SimError> {
+        state.validate()?;
+        let payload_json = serde_json::to_string(&Payload::IndonesianVocabulary {
+            state: state.clone(),
+        })
+        .map_err(|error| SimError::SerializationFailed {
+            subsystem: "Indonesian lexicon",
+            reason: error.to_string(),
+        })?;
+        integrity::write_payload(path.as_ref(), payload_json)
+    }
+
+    /// Menyimpan vocabulary, ID, relasi neuron, bobot sinaps, dan state LIF atomik.
+    pub fn save_language_network(
+        path: impl AsRef<Path>,
+        state: &crate::LanguageNetwork,
+    ) -> Result<(), SimError> {
+        state.validate()?;
+        let payload_json = serde_json::to_string(&Payload::LanguageNetwork {
+            state: Box::new(state.clone()),
+        })
+        .map_err(|error| SimError::SerializationFailed {
+            subsystem: "language network",
+            reason: error.to_string(),
+        })?;
+        integrity::write_payload(path.as_ref(), payload_json)
+    }
+
+    /// Menyimpan snapshot reasoning berversi dengan checksum dan atomic replace.
+    pub fn save_reasoning(
+        path: impl AsRef<Path>,
+        state: &crate::ReasoningCheckpoint,
+    ) -> Result<(), SimError> {
+        state.validate()?;
+        let payload_json = serde_json::to_string(&Payload::Reasoning {
+            state: state.clone(),
+        })
+        .map_err(|error| SimError::SerializationFailed {
+            subsystem: "reasoning checkpoint",
+            reason: error.to_string(),
+        })?;
+        integrity::write_payload(path.as_ref(), payload_json)
+    }
+
     pub fn save_knowledge(
         path: impl AsRef<Path>,
         network: &LifNetwork,
@@ -10,15 +58,16 @@ impl Checkpoint {
         action_neurons: &[usize],
         evaluator: Option<&RewardEvaluator>,
     ) -> Result<(), SimError> {
-        network.validate_restored_state()?;
+        let mut network = network.clone();
+        network.migrate_restored_identity_state()?;
         class_knowledge.validate()?;
-        validate_action_mapping(network, action_neurons)?;
+        validate_action_mapping(&network, action_neurons)?;
         if let Some(evaluator) = evaluator {
             evaluator.validate_restored_state()?;
         }
         let payload_json = serde_json::to_string(&Payload::KnowledgeNetwork {
-            network: network.clone(),
-            class_knowledge: class_knowledge.clone(),
+            network,
+            class_knowledge: Box::new(class_knowledge.clone()),
             action_neurons: action_neurons.to_vec(),
             evaluator: evaluator.cloned(),
         })
@@ -35,12 +84,13 @@ impl Checkpoint {
         network: &LifNetwork,
         evaluator: Option<&RewardEvaluator>,
     ) -> Result<(), SimError> {
-        network.validate_restored_state()?;
+        let mut network = network.clone();
+        network.migrate_restored_identity_state()?;
         if let Some(evaluator) = evaluator {
             evaluator.validate_restored_state()?;
         }
         let payload_json = serde_json::to_string(&Payload::Network {
-            network: network.clone(),
+            network,
             evaluator: evaluator.cloned(),
         })
         .map_err(|error| SimError::SerializationFailed {

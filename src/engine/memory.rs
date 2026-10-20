@@ -1,0 +1,54 @@
+use super::ReasoningEngine;
+use crate::{CausalAssociation, ReplayReport, SimError};
+
+impl ReasoningEngine {
+    /// Menghitung asosiasi fitur-label dari pengalaman berulang dalam task.
+    pub fn causal_associations(
+        &self,
+        task_id: &str,
+        minimum_support: usize,
+    ) -> Result<Vec<CausalAssociation>, SimError> {
+        self.memory.causal_associations(task_id, minimum_support)
+    }
+
+    /// Menggabungkan record fitur-mirip dengan label sama dan menghapus duplikat.
+    pub fn consolidate_memories(
+        &mut self,
+        task_id: &str,
+        minimum_similarity: f64,
+        importance_increase: f64,
+    ) -> Result<crate::ConsolidationReport, SimError> {
+        self.memory
+            .consolidate_similar(task_id, minimum_similarity, importance_increase)
+    }
+
+    /// Meluruhkan importance pengalaman dari waktu decay terakhir; penggunaan melindungi.
+    pub fn decay_memories(
+        &mut self,
+        half_life_seconds: f64,
+        usage_protection: f64,
+        minimum_importance: f64,
+    ) -> Result<crate::ForgettingReport, SimError> {
+        self.memory
+            .decay_by_time(half_life_seconds, usage_protection, minimum_importance)
+    }
+
+    /// Replay pengalaman relevan melalui LIF/STDP yang dikonfigurasi.
+    pub fn replay_experiences(
+        &mut self,
+        task_id: &str,
+        query: &[f64],
+        action_neurons: &[usize],
+        replay_limit: usize,
+        teacher_current_na: f64,
+    ) -> Result<ReplayReport, SimError> {
+        self.memory.replay_task_relevant(
+            task_id,
+            &mut self.network,
+            query,
+            action_neurons,
+            replay_limit,
+            teacher_current_na,
+        )
+    }
+}

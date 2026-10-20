@@ -1,0 +1,543 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:shella:schemas:indonesian-vocabulary:v1",
+  "title": "Shella Indonesian Vocabulary v1",
+  "description": "Import and persisted JSON structures for an Indonesian lexicon. Source and license fields are recorded assertions, not externally certified claims.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/importDocument"
+    },
+    {
+      "$ref": "#/$defs/persistedLibrary"
+    }
+  ],
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "language_tag"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "language_tag": {
+          "const": "id"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_name",
+        "source_uri",
+        "license",
+        "license_uri",
+        "source_entry_id"
+      ],
+      "properties": {
+        "source_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_uri": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1
+        },
+        "license_uri": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "source_entry_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "linguisticMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "part_of_speech",
+        "lemma",
+        "affixes",
+        "spelling_variants",
+        "definition",
+        "definition_source_entry_id"
+      ],
+      "properties": {
+        "part_of_speech": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lemma": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "affixes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "spelling_variants": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "definition": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "definition_source_entry_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "importEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "headword",
+        "sources"
+      ],
+      "properties": {
+        "headword": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        },
+        "linguistic": {
+          "$ref": "#/$defs/linguisticMetadata"
+        }
+      }
+    },
+    "persistedEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "word_id",
+        "headword",
+        "sources",
+        "linguistic"
+      ],
+      "properties": {
+        "word_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "headword": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        },
+        "linguistic": {
+          "$ref": "#/$defs/linguisticMetadata"
+        }
+      }
+    },
+    "datasetId": {
+      "enum": [
+        "ud_indonesian_gsd",
+        "ud_indonesian_csui",
+        "stopwords_iso_id",
+        "word_net_bahasa",
+        "hunspell_dictionaries",
+        "indo_nli"
+      ]
+    },
+    "datasetProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "repository_url",
+        "revision",
+        "license_id",
+        "license_url",
+        "attribution",
+        "data_scope",
+        "file_git_blob_sha1"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/datasetId"
+        },
+        "repository_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "license_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "license_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "attribution": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data_scope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "file_git_blob_sha1": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          }
+        }
+      }
+    },
+    "lexicalAnalysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "word_id",
+        "lemma",
+        "upos",
+        "features",
+        "dataset",
+        "source_entry_id"
+      ],
+      "properties": {
+        "word_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "lemma": {
+          "type": "string",
+          "minLength": 1
+        },
+        "upos": {
+          "type": "string",
+          "minLength": 1
+        },
+        "features": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "dataset": {
+          "$ref": "#/$defs/datasetProvenance"
+        },
+        "source_entry_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "lexicalRelationType": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "synonym",
+                "antonym",
+                "hypernym",
+                "hyponym",
+                "meronym",
+                "holonym"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "const": "dependency"
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "lexicalRelation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_word",
+        "target_word",
+        "relation_type",
+        "dataset",
+        "source_entry_id",
+        "source"
+      ],
+      "properties": {
+        "source_word": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "target_word": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "relation_type": {
+          "$ref": "#/$defs/lexicalRelationType"
+        },
+        "dataset": {
+          "$ref": "#/$defs/datasetProvenance"
+        },
+        "source_entry_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        }
+      }
+    },
+    "hunspellRoot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "word_id",
+        "flags",
+        "dataset",
+        "source_entry_id"
+      ],
+      "properties": {
+        "word_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "dataset": {
+          "$ref": "#/$defs/datasetProvenance"
+        },
+        "source_entry_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "hunspellAffixRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "flag",
+        "strip",
+        "add",
+        "condition",
+        "cross_product",
+        "dataset",
+        "source_entry_id"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "prefix",
+            "suffix"
+          ]
+        },
+        "flag": {
+          "type": "string",
+          "minLength": 1
+        },
+        "strip": {
+          "type": "string"
+        },
+        "add": {
+          "type": "string"
+        },
+        "condition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cross_product": {
+          "type": "boolean"
+        },
+        "dataset": {
+          "$ref": "#/$defs/datasetProvenance"
+        },
+        "source_entry_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "importDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "metadata",
+        "entries"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "metadata": {
+          "$ref": "#/$defs/metadata"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/importEntry"
+          }
+        }
+      }
+    },
+    "persistedLibrary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "metadata",
+        "vocabulary",
+        "entries"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "metadata": {
+          "$ref": "#/$defs/metadata"
+        },
+        "vocabulary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tokens",
+            "word_ids",
+            "next_word_id"
+          ],
+          "properties": {
+            "tokens": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              }
+            },
+            "word_ids": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              }
+            },
+            "next_word_id": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            }
+          }
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/persistedEntry"
+          }
+        },
+        "datasets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/datasetProvenance"
+          }
+        },
+        "analyses": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/lexicalAnalysis"
+          }
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/lexicalRelation"
+          }
+        },
+        "hunspell_roots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hunspellRoot"
+          }
+        },
+        "hunspell_rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hunspellAffixRule"
+          }
+        }
+      }
+    }
+  }
+}

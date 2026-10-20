@@ -4,6 +4,7 @@ mod restore;
 mod save;
 mod schema;
 
+pub use crate::ReasoningCheckpoint;
 pub use schema::{RestoredKnowledgeState, RestoredState};
 
 /// Operasi simpan/pulihkan checkpoint versi 1.

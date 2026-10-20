@@ -1,4 +1,7 @@
-use crate::{ClassKnowledgeModel, LifNetwork, LifRuntime, RewardEvaluator};
+use crate::{
+    ClassKnowledgeModel, IndonesianVocabulary, LanguageNetwork, LifNetwork, LifRuntime,
+    ReasoningCheckpoint, RewardEvaluator,
+};
 use serde::{Deserialize, Serialize};
 
 pub(super) const FORMAT_VERSION: u32 = 1;
@@ -33,9 +36,18 @@ pub(super) enum Payload {
     },
     KnowledgeNetwork {
         network: LifNetwork,
-        class_knowledge: ClassKnowledgeModel,
+        class_knowledge: Box<ClassKnowledgeModel>,
         action_neurons: Vec<usize>,
         evaluator: Option<RewardEvaluator>,
+    },
+    Reasoning {
+        state: ReasoningCheckpoint,
+    },
+    LanguageNetwork {
+        state: Box<LanguageNetwork>,
+    },
+    IndonesianVocabulary {
+        state: IndonesianVocabulary,
     },
 }
 

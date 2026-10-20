@@ -1,5 +1,8 @@
 use serde_json::json;
-use shella::{Checkpoint, LifConfig, LifNetwork, MemoryStore, Synapse};
+use shella::{
+    Checkpoint, LearningMemory, LifConfig, LifNetwork, MemoryStore, ReasoningConfig,
+    ReasoningEngine, Synapse,
+};
 use std::{
     error::Error,
     fs,
@@ -80,6 +83,39 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!(
         "memory_tag_search,{records},0,{NETWORK_STEPS_PER_BATCH},{tag_time:.0},{:.0}",
         1.0e9 / tag_time
+    );
+
+    let learning_path = directory.join("learning.json");
+    let mut learning_memory = LearningMemory::open(&learning_path)?;
+    let reasoning_network =
+        LifNetwork::new(LifConfig::new(1.0, 10.0, 1.0, -65.0, -70.0, -60.0, 1), 16)?;
+    for index in 0..16 {
+        let mut features = vec![0.0; 16];
+        features[index] = 1.0;
+        learning_memory.record_feedback(
+            "benchmark",
+            &features,
+            Some(index % 4),
+            Some(index % 4),
+        )?;
+    }
+    let mut reasoning = ReasoningEngine::new(
+        reasoning_network,
+        learning_memory,
+        ReasoningConfig::new(3, 8, 100.0, 0.05, 0.0)?,
+    );
+    let query = [
+        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    ];
+    let action_neurons = [12, 13, 14, 15];
+    let reasoning_time = median_per_operation(BATCHES, NETWORK_STEPS_PER_BATCH, || {
+        let result = reasoning.reason("benchmark", &query, &action_neurons)?;
+        std::hint::black_box(result.confidence());
+        Ok::<_, shella::SimError>(())
+    })?;
+    println!(
+        "reasoning_engine,16,0,{NETWORK_STEPS_PER_BATCH},{reasoning_time:.0},{:.0}",
+        1.0e9 / reasoning_time
     );
     fs::remove_dir_all(directory)?;
     Ok(())

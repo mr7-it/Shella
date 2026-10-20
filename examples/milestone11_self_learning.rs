@@ -581,7 +581,7 @@ fn collect_class_knowledge_predictions(
 
 fn append_class_metrics(output: &mut String, seed: u64, pairs: &[(usize, Option<usize>)]) {
     let class_names = ["Iris-setosa", "Iris-versicolor", "Iris-virginica"];
-    for class_id in 0..class_names.len() {
+    for (class_id, class_name) in class_names.iter().enumerate() {
         let mut tp = 0;
         let mut fp = 0;
         let mut false_negative = 0;
@@ -615,7 +615,7 @@ fn append_class_metrics(output: &mut String, seed: u64, pairs: &[(usize, Option<
         let fnr = ratio(false_negative, false_negative + tp);
         output.push_str(&format!(
             "{seed},{class_id},{},{tp},{fp},{false_negative},{tn},{accuracy:.6},{precision:.6},{recall:.6},{f1:.6},{fpr:.6},{fnr:.6},{},{},{}\n",
-            class_names[class_id], confusion[0], confusion[1], confusion[2]
+            class_name, confusion[0], confusion[1], confusion[2]
         ));
     }
 }

@@ -14,8 +14,24 @@ Paket Cargo, crate library, dan binari utama bernama `shella`. `src/lib.rs` meng
 - `checkpoint/`: schema, integritas/checksum/file writer, save, dan restore.
 - `memory/`: schema record, mutasi/store, retrieval, dan persistence/integritas.
 - `decision/`: konfigurasi kandidat/kebijakan, seleksi/skoring, alasan abstain terstruktur, dan confusion metrics.
-- `language/`: normalisasi, tokenizer, vocabulary, dan encoder arus.
+- `identity/`: strong types `SubwordID`, `WordID`, `NeuronID`, dan `SynapseID`.
+- `language/`: normalisasi/tokenizer, vocabulary dengan hashbrown SwissTable untuk
+  lookup teks, segmentasi subword ber-ID stabil, representasi kata-neuron
+  terdistribusi, dan koneksi lexical yang memakai sinaps jaringan aktual.
+  `indonesian/` menyediakan lexicon ID berprovenance dengan JSON terversi,
+  validasi metadata linguistik, indeks alias, impor batch atomik, serta integrasi
+  vocabulary ke jaringan. Submodul `datasets`, `licenses`, `relations`,
+  `hunspell`, `nusax`, dan `indosum` memuat parser/policy sumber. Aset
+  stopwords-id, PUD, NusaX, dan IndoSum berada terpisah di `data/language/` dan
+  diverifikasi dengan hash sebelum digunakan. GSD/CSUI/IndoNLI tidak diaktifkan
+  karena lisensi teks atau cakupan izinnya belum terverifikasi.
 - `sdk/`: input/output, engine, sesi, dan adapter persistence.
+- `engine/`: reasoning engine modular terpisah dari SDK. `inference.rs` mengorkestrasi
+  retrieval `LearningMemory` dan langkah LIF; `temporal.rs`, `calibration.rs`,
+  `learning.rs`, `checkpoint.rs`, `analysis.rs`, dan `validation.rs` memisahkan
+  perhatian temporal, kalibrasi, pembelajaran, persistensi, analisis bukti/budget,
+  serta validasi. `mod.rs` menyimpan state dan API orkestrasi dasar,
+  perhatian temporal, iterasi jaringan LIF, abstention, dan trace metrik.
 
 ## Jalur simulasi
 
@@ -31,7 +47,7 @@ Benchmark conditioning memanggil `LifNetwork`, evaluator, dan reward learning pr
 
 ## State persisten
 
-`Checkpoint` menyimpan `LifRuntime` atau seluruh `LifNetwork` (parameter neuron, membran/refraktori, spike/clock, topologi/bobot, traces, pending events) dan evaluator opsional. JSON berversi memeriksa ukuran, checksum, dan invariants sebelum pemulihan.
+`Checkpoint` menyimpan `LifRuntime`, `LifNetwork`, atau `LanguageNetwork` (vocabulary dan ID kata/subword, binding neuron, relasi ID sinaps, bobot, parameter neuron, traces, pending events) serta evaluator opsional. JSON berversi memeriksa ukuran, checksum, dan invariants sebelum pemulihan. Network lama tanpa field identitas dimigrasikan secara deterministik dari urutan populasi/topologi saat restore; ID tersebut disimpan pada save berikutnya.
 
 `MemoryStore` adalah store JSON terpisah dengan upsert, delete, get, ID stabil, prefix/tag retrieval, version/checksum check, dan write-temp/rename. Advisory exclusive lock pada sidecar path mencegah lebih dari satu instance/proses membuka store yang sama untuk menulis; path dinormalisasi sebelum lock diambil. Format menyimpan record JSON; tidak ada embedding atau associative retrieval semantik.
 
@@ -39,10 +55,52 @@ Benchmark conditioning memanggil `LifNetwork`, evaluator, dan reward learning pr
 
 `DecisionPolicy` menghitung skor linear dari fitur yang disediakan aplikasi; `selection` menghasilkan kontribusi terurai, margin, alasan, tie-break, atau abstain. Skor bukan probabilitas dan confidence tidak dikalibrasi.
 
-Pipeline teks menormalisasi Unicode lowercase, tokenisasi karakter alfanumerik, mempelajari vocabulary dari korpus input, lalu mengubah ID token menjadi arus menggunakan proyeksi modulo indeks neuron. Tidak ada model bahasa, decoder/generator, pembelajaran semantik, atau metrik generalisasi teks.
+Pipeline teks menormalisasi Unicode lowercase dan tokenisasi karakter alfanumerik. `Vocabulary` menyimpan `WordID` terpisah dari nilai hash; hashbrown hanya menjadi indeks lookup. `LanguageNetwork` memberi tiap kata urutan `SubwordID`, dapat mengikat kata pada banyak `NeuronID`, membentuk sinaps aktual di antara representasi kata, serta memproyeksikan input ke LIF/STDP. `ReasoningEngine::reason_text` menghubungkan proyeksi teks dengan retrieval memory dan reasoning yang ada. `TextEncoder` lama tetap tersedia dengan proyeksi modulo agar API kompatibel. Tidak ada model bahasa, decoder/generator, pembelajaran semantik, atau metrik generalisasi teks.
+
+`IndonesianVocabulary` memvalidasi entri JSON dengan schema version, ID kata
+append-only, provenance sumber/lisensi per entri, metadata linguistik opsional,
+dan alias ejaan NFC. Lookup alias menggunakan hashbrown; ID tidak berasal dari
+hash. Checkpoint umum menyediakan checksum dan atomic replace untuk lexicon.
+Validasi struktur metadata tidak mengesahkan sumber/licensing secara eksternal.
+Dataset pihak ketiga yang disetujui disimpan terpisah dari kode di
+`data/language/` dan divalidasi melalui registry; dataset lain tidak diaktifkan
+tanpa izin yang jelas. Segmentasi kata tak terdaftar hanya bersifat ortografis.
 
 `Engine`/`Session` mengirim input arus/teks ke network, menerima spike aktual, menghubungkan spike neuron ke kanal aksi, memanggil decision/evaluator, menulis memory, dan menyimpan/memulihkan checkpoint. SDK sinkron dalam proses.
 
+`ReasoningEngine` memiliki `LifNetwork` dan `LearningMemory`. Setiap panggilan
+`reason` mengambil pengalaman sesuai context, menggabungkan retrieval score dengan
+timestamp Unix nanodetik pengalaman untuk bobot temporal, menginjeksikan dukungan aksi ke arus LIF, lalu
+menjalankan jumlah langkah yang dikonfigurasi. Hasil menyertakan langkah jaringan,
+recall, perhatian, dukungan aksi, entropy, evidence strength, dan confidence heuristik.
+Skor heuristik bukan probabilitas. `fit_confidence_calibration` melatih Platt hanya
+dengan validation samples dan menghitung Brier/MAE pada evaluation samples terpisah;
+hasil kalibrasi diakses terpisah dari skor mentah. Aksi ditahan bila tidak ada
+dukungan atau confidence keputusan di bawah ambang. `learn_from_feedback` menulis
+feedback ke memori; bila STDP aktif, ia menyajikan input dan spike pengajar ke
+jaringan lalu mengirim signed reward pada mode reward-modulated STDP. Tanpa STDP,
+readout sinaps yang ada tetap dipakai.
+
+Context window opsional membatasi riwayat transisi per context ID; compute budget
+adaptif memilih 1..=configured maximum dari densitas input, distribusi recall, dan
+kontradiksi. Goal-directed retrieval menggabungkan input dan fitur goal hanya untuk
+query, tidak mengubah input arus LIF. Contradiction detection membandingkan label
+pada pengalaman recall yang similarity-nya tinggi. Causal association API hanya
+mengagregasi ko-occurence fitur-label, bukan bukti kausal intervensional.
+
+Consolidation menggabungkan record mirip dalam task dan label sama, menghitung rerata
+berbobot evidence count, dan menghapus duplikat. Time decay memakai umur sejak decay
+terakhir; usage count memperpanjang effective half-life. Experience replay memakai
+API replay `LearningMemory` yang menjalankan input pengajar melalui network dan
+reward-modulated STDP bila aktif. Reasoning checkpoint memuat jaringan, konfigurasi,
+context dan kalibrator/provenance secara checksummed; fingerprint record
+`LearningMemory` mencegah restore terhadap versi store berbeda. File checkpoint dan
+file memory bukan satu transaksi filesystem, sehingga mismatch menghasilkan error
+alih-alih pemulihan parsial.
+
 ## Batas operasional
 
-Tidak tersedia transport HTTP/RPC, server, multi-writer lock, migrasi schema otomatis, confidence probabilistik, enkripsi file, atau model bahasa. Checkpoint SDK menyimpan state network/evaluator, bukan konfigurasi encoder/policy statis; aplikasi perlu memasangnya kembali. Memory mempunyai file persisten tersendiri.
+Tidak tersedia transport HTTP/RPC, server, multi-writer lock, migrasi schema umum,
+default calibrated confidence tanpa validation fit, enkripsi file, atau model bahasa.
+Checkpoint SDK menyimpan state network/evaluator, bukan konfigurasi encoder/policy
+statis; aplikasi perlu memasangnya kembali. Memory mempunyai file persisten tersendiri.

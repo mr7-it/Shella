@@ -4,13 +4,22 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 const EXPERIENCE_VERSION: u32 = 1;
 const EXPERIENCE_PREFIX: &str = "learning/experience/";
 const CLASS_KNOWLEDGE_PREFIX: &str = "class-knowledge/model/";
 const MAX_IMPORTANCE: f64 = 10.0;
 const CONFLICT_SIMILARITY_THRESHOLD: f64 = 0.45;
+const MAX_FUTURE_TIMESTAMP_SKEW_NS: u64 = 5_000_000_000;
+const NANOS_PER_SECOND: f64 = 1_000_000_000.0;
+
+fn default_evidence_count() -> u64 {
+    1
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct StoredExperience {
@@ -20,6 +29,16 @@ struct StoredExperience {
     expected_action: Option<usize>,
     feedback: f64,
     importance: f64,
+    #[serde(default)]
+    created_at_unix_nanos: u64,
+    #[serde(default)]
+    last_decay_unix_nanos: u64,
+    #[serde(default)]
+    usage_count: u64,
+    #[serde(default)]
+    last_used_unix_nanos: Option<u64>,
+    #[serde(default = "default_evidence_count")]
+    evidence_count: u64,
     #[serde(default)]
     embedding: Option<Vec<f32>>,
 }
@@ -66,6 +85,9 @@ pub struct MemoryRecall {
     expected_action: Option<usize>,
     feedback: f64,
     importance: f64,
+    created_at_unix_nanos: u64,
+    usage_count: u64,
+    evidence_count: u64,
     similarity: f64,
     retrieval_score: f64,
 }
@@ -94,6 +116,19 @@ impl MemoryRecall {
     #[must_use]
     pub const fn importance(&self) -> f64 {
         self.importance
+    }
+    /// Waktu pembuatan pengalaman sebagai nanodetik sejak Unix epoch.
+    #[must_use]
+    pub const fn created_at_unix_nanos(&self) -> u64 {
+        self.created_at_unix_nanos
+    }
+    #[must_use]
+    pub const fn usage_count(&self) -> u64 {
+        self.usage_count
+    }
+    #[must_use]
+    pub const fn evidence_count(&self) -> u64 {
+        self.evidence_count
     }
     #[must_use]
     pub const fn similarity(&self) -> f64 {
@@ -207,6 +242,25 @@ pub struct ForgettingReport {
     deleted: usize,
 }
 
+/// Ringkasan penggabungan pengalaman berlabel sama dan sangat mirip.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsolidationReport {
+    retained_record_ids: Vec<String>,
+    merged_records: usize,
+}
+
+impl ConsolidationReport {
+    #[must_use]
+    pub fn retained_record_ids(&self) -> &[String] {
+        &self.retained_record_ids
+    }
+
+    #[must_use]
+    pub const fn merged_records(&self) -> usize {
+        self.merged_records
+    }
+}
+
 impl ForgettingReport {
     #[must_use]
     pub const fn examined(self) -> usize {
@@ -231,28 +285,74 @@ impl ForgettingReport {
 pub struct LearningMemory {
     store: MemoryStore,
     next_id: u64,
+    last_timestamp_unix_nanos: u64,
 }
 
 impl LearningMemory {
     /// Membuka store eksklusif dan memvalidasi seluruh record pengalaman.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, SimError> {
-        let store = MemoryStore::open(path)?;
+        let mut store = MemoryStore::open(path)?;
         let mut next_id = 1_u64;
-        for record in store.records() {
-            if let Some(suffix) = record.key().strip_prefix(EXPERIENCE_PREFIX) {
-                let experience = decode_experience(record.value())?;
-                validate_experience(&experience)?;
-                let id =
-                    u64::from_str_radix(suffix, 16).map_err(|error| SimError::CorruptData {
-                        subsystem: "memori pembelajaran",
-                        reason: error.to_string(),
-                    })?;
-                next_id = next_id.max(id.checked_add(1).ok_or(SimError::CounterOverflow {
-                    counter: "ID pengalaman memori",
-                })?);
+        let mut last_timestamp_unix_nanos = 0_u64;
+        let records = store
+            .records()
+            .filter(|record| record.key().starts_with(EXPERIENCE_PREFIX))
+            .cloned()
+            .collect::<Vec<_>>();
+        let migration_timestamp = unix_timestamp_nanos()?;
+        for record in records {
+            let mut value = record.value().clone();
+            let object = value.as_object_mut().ok_or_else(|| SimError::CorruptData {
+                subsystem: "memori pembelajaran",
+                reason: "pengalaman legacy bukan objek JSON".to_owned(),
+            })?;
+            let created_timestamp = object
+                .get("created_at_unix_nanos")
+                .and_then(Value::as_u64)
+                .unwrap_or(migration_timestamp);
+            let mut migrated = false;
+            if !object.contains_key("created_at_unix_nanos") {
+                object.insert(
+                    "created_at_unix_nanos".to_owned(),
+                    migration_timestamp.into(),
+                );
+                migrated = true;
             }
+            if !object.contains_key("last_decay_unix_nanos") {
+                object.insert("last_decay_unix_nanos".to_owned(), created_timestamp.into());
+                migrated = true;
+            }
+            if !object.contains_key("evidence_count") {
+                object.insert("evidence_count".to_owned(), 1_u64.into());
+                migrated = true;
+            }
+            if migrated {
+                store.put(record.key(), value.clone(), record.tags())?;
+            }
+            let experience = decode_experience(&value)?;
+            validate_experience(&experience)?;
+            last_timestamp_unix_nanos =
+                last_timestamp_unix_nanos.max(experience.created_at_unix_nanos);
+            let suffix = record
+                .key()
+                .strip_prefix(EXPERIENCE_PREFIX)
+                .ok_or_else(|| SimError::CorruptData {
+                    subsystem: "memori pembelajaran",
+                    reason: "key pengalaman tidak konsisten".to_owned(),
+                })?;
+            let id = u64::from_str_radix(suffix, 16).map_err(|error| SimError::CorruptData {
+                subsystem: "memori pembelajaran",
+                reason: error.to_string(),
+            })?;
+            next_id = next_id.max(id.checked_add(1).ok_or(SimError::CounterOverflow {
+                counter: "ID pengalaman memori",
+            })?);
         }
-        Ok(Self { store, next_id })
+        Ok(Self {
+            store,
+            next_id,
+            last_timestamp_unix_nanos,
+        })
     }
 
     #[must_use]
@@ -424,6 +524,7 @@ impl LearningMemory {
         validate_task_id(task_id)?;
         validate_features(features)?;
         validate_feedback(feedback, importance)?;
+        let created_at_unix_nanos = self.next_timestamp()?;
         let conflicts =
             self.find_conflicts(features, expected_action, CONFLICT_SIMILARITY_THRESHOLD)?;
         let experience = StoredExperience {
@@ -433,6 +534,11 @@ impl LearningMemory {
             expected_action,
             feedback,
             importance,
+            created_at_unix_nanos,
+            last_decay_unix_nanos: created_at_unix_nanos,
+            usage_count: 0,
+            last_used_unix_nanos: None,
+            evidence_count: 1,
             embedding: None,
         };
         let record_id = self.insert_experience(&experience)?;
@@ -453,6 +559,7 @@ impl LearningMemory {
     ) -> Result<MemoryFeedbackWrite, SimError> {
         validate_task_id(task_id)?;
         let embedding = TextEmbedding::from_text(text, 256)?;
+        let created_at_unix_nanos = self.next_timestamp()?;
         let correct = expected_action == predicted_action;
         let experience = StoredExperience {
             version: EXPERIENCE_VERSION,
@@ -465,6 +572,11 @@ impl LearningMemory {
             expected_action,
             feedback: if correct { 1.0 } else { -1.0 },
             importance: if correct { 1.0 } else { 2.0 },
+            created_at_unix_nanos,
+            last_decay_unix_nanos: created_at_unix_nanos,
+            usage_count: 0,
+            last_used_unix_nanos: None,
+            evidence_count: 1,
             embedding: Some(embedding.values().to_vec()),
         };
         validate_experience(&experience)?;
@@ -567,7 +679,9 @@ impl LearningMemory {
                 continue;
             }
             let error_priority = if experience.feedback < 0.0 { 2.0 } else { 1.0 };
-            let retrieval_score = similarity * (1.0 + experience.importance) * error_priority;
+            let use_evidence = 1.0 + (experience.usage_count as f64).ln_1p() * 0.1;
+            let retrieval_score =
+                similarity * (1.0 + experience.importance) * error_priority * use_evidence;
             recalled.push(MemoryRecall {
                 record_id: record.id().to_owned(),
                 task_id: experience.task_id,
@@ -575,6 +689,9 @@ impl LearningMemory {
                 expected_action: experience.expected_action,
                 feedback: experience.feedback,
                 importance: experience.importance,
+                created_at_unix_nanos: experience.created_at_unix_nanos,
+                usage_count: experience.usage_count,
+                evidence_count: experience.evidence_count,
                 similarity,
                 retrieval_score,
             });
@@ -617,6 +734,299 @@ impl LearningMemory {
                 similarity: memory.similarity,
             })
             .collect())
+    }
+
+    /// Menghasilkan asosiasi fitur-label yang didukung pengalaman berulang.
+    /// Ini adalah ko-occurence terukur, bukan bukti intervensi kausal.
+    pub fn causal_associations(
+        &self,
+        task_id: &str,
+        minimum_support: usize,
+    ) -> Result<Vec<crate::reasoning::CausalAssociation>, SimError> {
+        validate_task_id(task_id)?;
+        if minimum_support == 0 {
+            return Err(SimError::InvalidInput {
+                parameter: "minimum_support",
+                reason: "harus sekurang-kurangnya satu pengalaman",
+            });
+        }
+        let mut totals = BTreeMap::<usize, BTreeMap<usize, usize>>::new();
+        for record in self.store.records() {
+            if !record.key().starts_with(EXPERIENCE_PREFIX) {
+                continue;
+            }
+            let experience = decode_experience(record.value())?;
+            if experience.task_id != task_id {
+                continue;
+            }
+            let Some(action) = experience.expected_action else {
+                continue;
+            };
+            for (feature_index, value) in experience.features.iter().enumerate() {
+                if *value != 0.0 {
+                    *totals
+                        .entry(feature_index)
+                        .or_default()
+                        .entry(action)
+                        .or_default() += 1;
+                }
+            }
+        }
+        let mut associations = Vec::new();
+        for (feature_index, actions) in &totals {
+            for (action, support) in actions {
+                if *support < minimum_support {
+                    continue;
+                }
+                let contradicting_experiences = actions
+                    .iter()
+                    .filter(|(other_action, _)| *other_action != action)
+                    .map(|(_, count)| *count)
+                    .sum();
+                associations.push(crate::reasoning::CausalAssociation {
+                    feature_index: *feature_index,
+                    action: *action,
+                    supporting_experiences: *support,
+                    contradicting_experiences,
+                });
+            }
+        }
+        associations.sort_by_key(|item| (item.feature_index(), item.action()));
+        Ok(associations)
+    }
+
+    /// Menggabungkan fitur yang mirip hanya jika task dan labelnya sama.
+    pub fn consolidate_similar(
+        &mut self,
+        task_id: &str,
+        minimum_similarity: f64,
+        importance_increase: f64,
+    ) -> Result<ConsolidationReport, SimError> {
+        validate_task_id(task_id)?;
+        if !minimum_similarity.is_finite()
+            || !(0.0..=1.0).contains(&minimum_similarity)
+            || !importance_increase.is_finite()
+            || importance_increase <= 0.0
+        {
+            return Err(SimError::InvalidInput {
+                parameter: "consolidation_policy",
+                reason: "similarity harus 0..=1 dan importance increase positif finite",
+            });
+        }
+        let records = self
+            .store
+            .records()
+            .filter(|record| record.key().starts_with(EXPERIENCE_PREFIX))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut groups = Vec::<Vec<(String, StoredExperience)>>::new();
+        for record in records {
+            let experience = decode_experience(record.value())?;
+            if experience.task_id != task_id {
+                continue;
+            }
+            let mut matching_group = None;
+            for (group_index, group) in groups.iter().enumerate() {
+                if group[0].1.expected_action == experience.expected_action
+                    && cosine_similarity(&group[0].1.features, &experience.features)
+                        >= minimum_similarity
+                {
+                    matching_group = Some(group_index);
+                    break;
+                }
+            }
+            if let Some(group_index) = matching_group {
+                groups[group_index].push((record.key().to_owned(), experience));
+            } else {
+                groups.push(vec![(record.key().to_owned(), experience)]);
+            }
+        }
+
+        let mut report = ConsolidationReport {
+            retained_record_ids: Vec::new(),
+            merged_records: 0,
+        };
+        for mut group in groups {
+            if group.len() < 2 {
+                continue;
+            }
+            group.sort_by_key(|(_, experience)| experience.created_at_unix_nanos);
+            let retained = group.pop().ok_or(SimError::InvalidInput {
+                parameter: "consolidation_group",
+                reason: "konsolidasi membutuhkan record",
+            })?;
+            let dimensions = retained.1.features.len();
+            if group
+                .iter()
+                .any(|(_, experience)| experience.features.len() != dimensions)
+            {
+                continue;
+            }
+            let mut combined = retained.1.clone();
+            let mut feature_sums = combined
+                .features
+                .iter()
+                .map(|value| value * combined.evidence_count as f64)
+                .collect::<Vec<_>>();
+            let mut feedback_sum = combined.feedback * combined.evidence_count as f64;
+            for (_, experience) in &group {
+                for (sum, value) in feature_sums.iter_mut().zip(&experience.features) {
+                    *sum += value * experience.evidence_count as f64;
+                }
+                feedback_sum += experience.feedback * experience.evidence_count as f64;
+                combined.importance =
+                    (combined.importance + experience.importance).min(MAX_IMPORTANCE);
+                combined.evidence_count = combined
+                    .evidence_count
+                    .saturating_add(experience.evidence_count);
+                combined.usage_count = combined.usage_count.saturating_add(experience.usage_count);
+                combined.last_used_unix_nanos = combined
+                    .last_used_unix_nanos
+                    .max(experience.last_used_unix_nanos);
+                combined.last_decay_unix_nanos = combined
+                    .last_decay_unix_nanos
+                    .max(experience.last_decay_unix_nanos);
+            }
+            let evidence_count = combined.evidence_count.max(1);
+            combined.features = feature_sums
+                .into_iter()
+                .map(|sum| sum / evidence_count as f64)
+                .collect();
+            combined.feedback = (feedback_sum / evidence_count as f64).clamp(-1.0, 1.0);
+            combined.importance = (combined.importance + importance_increase).min(MAX_IMPORTANCE);
+            if let Some(original_embedding) = &retained.1.embedding {
+                let mut embedding = vec![0.0_f32; original_embedding.len()];
+                let mut embedding_count = 0_usize;
+                for experience in std::iter::once(&retained.1)
+                    .chain(group.iter().map(|(_, experience)| experience))
+                {
+                    if let Some(values) = &experience.embedding
+                        && values.len() == embedding.len()
+                    {
+                        for (sum, value) in embedding.iter_mut().zip(values) {
+                            *sum += value;
+                        }
+                        embedding_count += 1;
+                    }
+                }
+                if embedding_count > 0 {
+                    for value in &mut embedding {
+                        *value /= embedding_count as f32;
+                    }
+                    combined.embedding = Some(embedding);
+                }
+            }
+            self.store
+                .put(&retained.0, encode_experience(&combined)?, &[])?;
+            report.retained_record_ids.push(
+                self.store
+                    .get(&retained.0)
+                    .ok_or(SimError::CorruptData {
+                        subsystem: "memori pembelajaran",
+                        reason: "record konsolidasi hilang".to_owned(),
+                    })?
+                    .id()
+                    .to_owned(),
+            );
+            for (key, _) in group {
+                self.store.delete(&key)?;
+                report.merged_records += 1;
+            }
+        }
+        Ok(report)
+    }
+
+    /// Menerapkan peluruhan berbasis waktu yang telah berlalu sejak decay terakhir.
+    pub fn decay_by_time(
+        &mut self,
+        half_life_seconds: f64,
+        usage_protection: f64,
+        minimum_importance: f64,
+    ) -> Result<ForgettingReport, SimError> {
+        if !half_life_seconds.is_finite()
+            || half_life_seconds <= 0.0
+            || !usage_protection.is_finite()
+            || usage_protection < 0.0
+            || !minimum_importance.is_finite()
+            || minimum_importance < 0.0
+        {
+            return Err(SimError::InvalidInput {
+                parameter: "temporal_decay_policy",
+                reason: "half-life positif, usage protection dan minimum importance non-negatif",
+            });
+        }
+        let now = unix_timestamp_nanos()?;
+        let records = self
+            .store
+            .records()
+            .filter(|record| record.key().starts_with(EXPERIENCE_PREFIX))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut report = ForgettingReport {
+            examined: records.len(),
+            protected: 0,
+            decayed: 0,
+            deleted: 0,
+        };
+        for record in records {
+            let mut experience = decode_experience(record.value())?;
+            let decay_timestamp = now.max(experience.last_decay_unix_nanos);
+            let elapsed = decay_timestamp.saturating_sub(experience.last_decay_unix_nanos) as f64
+                / NANOS_PER_SECOND;
+            let effective_half_life = half_life_seconds
+                * (1.0 + usage_protection * (experience.usage_count as f64).ln_1p());
+            if !effective_half_life.is_finite() || effective_half_life <= 0.0 {
+                return Err(SimError::NumericalOverflow {
+                    operation: "half-life memory decay",
+                });
+            }
+            let temporal_factor = 0.5_f64.powf(elapsed / effective_half_life);
+            experience.importance *= temporal_factor;
+            experience.last_decay_unix_nanos = decay_timestamp;
+            if experience.importance < minimum_importance {
+                self.store.delete(record.key())?;
+                report.deleted += 1;
+            } else {
+                self.store
+                    .put(record.key(), encode_experience(&experience)?, &[])?;
+                report.decayed += 1;
+            }
+        }
+        Ok(report)
+    }
+
+    pub(crate) fn record_recall_usage(&mut self, record_ids: &[String]) -> Result<(), SimError> {
+        let now = unix_timestamp_nanos()?;
+        for record_id in record_ids {
+            let Some(record) = self.store.get_by_id(record_id) else {
+                continue;
+            };
+            let key = record.key().to_owned();
+            let mut experience = decode_experience(record.value())?;
+            experience.usage_count =
+                experience
+                    .usage_count
+                    .checked_add(1)
+                    .ok_or(SimError::CounterOverflow {
+                        counter: "penggunaan pengalaman",
+                    })?;
+            experience.last_used_unix_nanos = Some(now.max(experience.created_at_unix_nanos));
+            self.store.put(key, encode_experience(&experience)?, &[])?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn checkpoint_fingerprint(&self) -> Result<String, SimError> {
+        let records = self.store.records().collect::<Vec<_>>();
+        let bytes =
+            serde_json::to_vec(&records).map_err(|error| SimError::SerializationFailed {
+                subsystem: "reasoning memory fingerprint",
+                reason: error.to_string(),
+            })?;
+        let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |state, byte| {
+            (state ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+        Ok(format!("{hash:016x}"))
     }
 
     /// Konsolidasi menaikkan proteksi pengalaman agar tidak terhapus oleh decay.
@@ -1001,11 +1411,25 @@ impl LearningMemory {
                 break key;
             }
         };
-        self.store.put(
+        let record_id = self.store.put(
             key,
             encode_experience(experience)?,
             &["pengalaman".to_owned()],
-        )
+        )?;
+        self.last_timestamp_unix_nanos = self
+            .last_timestamp_unix_nanos
+            .max(experience.created_at_unix_nanos);
+        Ok(record_id)
+    }
+
+    fn next_timestamp(&self) -> Result<u64, SimError> {
+        let next =
+            self.last_timestamp_unix_nanos
+                .checked_add(1)
+                .ok_or(SimError::CounterOverflow {
+                    counter: "timestamp pengalaman",
+                })?;
+        Ok(unix_timestamp_nanos()?.max(next))
     }
 }
 
@@ -1035,6 +1459,23 @@ fn validate_experience(experience: &StoredExperience) -> Result<(), SimError> {
     validate_task_id(&experience.task_id)?;
     validate_features(&experience.features)?;
     validate_feedback(experience.feedback, experience.importance)?;
+    let now = unix_timestamp_nanos()?;
+    if experience.created_at_unix_nanos == 0
+        || experience.last_decay_unix_nanos == 0
+        || experience.evidence_count == 0
+        || experience.created_at_unix_nanos > now.saturating_add(MAX_FUTURE_TIMESTAMP_SKEW_NS)
+        || experience.last_decay_unix_nanos < experience.created_at_unix_nanos
+        || experience.last_decay_unix_nanos > now.saturating_add(MAX_FUTURE_TIMESTAMP_SKEW_NS)
+        || experience.last_used_unix_nanos.is_some_and(|timestamp| {
+            timestamp < experience.created_at_unix_nanos
+                || timestamp > now.saturating_add(MAX_FUTURE_TIMESTAMP_SKEW_NS)
+        })
+    {
+        return Err(SimError::CorruptData {
+            subsystem: "memori pembelajaran",
+            reason: "timestamp pengalaman kosong atau berada terlalu jauh di masa depan".to_owned(),
+        });
+    }
     if let Some(embedding) = &experience.embedding {
         if embedding.is_empty() || embedding.iter().any(|value| !value.is_finite()) {
             return Err(SimError::CorruptData {
@@ -1044,6 +1485,22 @@ fn validate_experience(experience: &StoredExperience) -> Result<(), SimError> {
         }
     }
     Ok(())
+}
+
+pub(crate) fn unix_timestamp_nanos() -> Result<u64, SimError> {
+    let elapsed =
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| SimError::NumericalOverflow {
+                operation: "timestamp pengalaman sebelum Unix epoch",
+            })?;
+    u64::try_from(elapsed.as_nanos()).map_err(|_| SimError::NumericalOverflow {
+        operation: "konversi timestamp pengalaman",
+    })
+}
+
+pub(crate) const fn nanos_per_second() -> f64 {
+    NANOS_PER_SECOND
 }
 
 fn validate_task_id(task_id: &str) -> Result<(), SimError> {

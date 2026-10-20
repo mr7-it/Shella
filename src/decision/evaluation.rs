@@ -1,5 +1,6 @@
 use super::{AbstentionReason, Decision, policy::validate_id};
 use crate::SimError;
+use serde::{Deserialize, Serialize};
 
 /// Akumulator confusion metrics untuk keputusan dengan kelas atau target diam.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -242,7 +243,7 @@ impl DecisionEvaluator {
 
 /// Akumulasi kalibrasi untuk confidence pada rentang probabilitas `[0, 1]`.
 /// Skor linear dan margin keputusan tidak diterima karena keduanya bukan probabilitas.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct CalibrationMetrics {
     samples: u64,
     brier_sum: f64,

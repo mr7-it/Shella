@@ -29,7 +29,12 @@ MSRV di manifest adalah Rust 1.85. Jalankan gerbang di stable dan MSRV jika peru
 - `tests/persistent_memory.rs`: CRUD/upsert, ID stabil, prefix/tag retrieval, restart proses nyata, input invalid dan data rusak.
 - `tests/decision_engine.rs`: skor/kontribusi terhitung, tie-break, abstain, unknown features, invalid input, overflow skor, dan overflow margin.
 - `tests/language_pipeline.rs`: normalisasi, aturan tokenizer Unicode, vocabulary deterministik/unknown, pemisahan train/eval, arus encoder, serta penolakan input tanpa token.
+- `tests/language_network.rs`: WordID persisten dan migrasi vocabulary legacy, ID neuron/sinaps stabil, representasi word ke banyak neuron, koneksi sinaps aktual dengan pembaruan STDP, checkpoint restart penuh, dan integrasi reasoning teks-memory.
+- `tests/indonesian_vocabulary.rs`, `tests/indonesian_datasets.rs`: normalisasi, ID stabil, lookup, persistensi, penolakan file yang hash-nya tidak cocok, metadata lisensi, serta parser/stopword ke input LanguageNetwork.
+- `tests/indonesian_upstream_datasets.rs`: file stopwords, PUD, seluruh 50 CSV NusaX, dan arsip IndoSum yang dibundel diverifikasi terhadap pin sumber; juga menguji parse, tokenizer, evaluasi held-out, round-trip, integrasi vocabulary neural, korupsi input, dan batas fold.
+- `tests/indonesian_stopwords_upstream.rs` dan `tests/indonesian_hunspell_upstream.rs` tetap tes upstream `#[ignore]` untuk jalur file eksternal; tes baru memakai aset yang sudah dipin dan dibundel.
 - `tests/sdk_integration.rs`: teks -> input neuron -> network terlatih -> reward evaluator -> held-out action -> decision -> memory -> checkpoint.
+- `tests/reasoning_engine.rs`: kalibrasi ber-ID dan split leakage, timestamp/migrasi, context window dan isolasi context, consolidation/decay/penggunaan, asosiasi-kontradiksi, uncertainty decomposition, compute budget, goal retrieval, STDP/reward-STDP/replay, determinisme, serta checkpoint/fingerprint restart.
 - Unit test evaluator kalibrasi: confidence di luar `0..1` ditolak dan Brier/MAE dihitung dari confidence probabilistik yang diberikan.
 - `tests/milestone10_secure_adaptive.rs`: embedding semantic retrieval, TTL restart, enkripsi AES-GCM, signature Ed25519, writer bergantian, Platt scaling, dan isotonic regression.
 - `examples/milestone10_long_term.rs`: runner release 12 seed × 4 varian × 16 repetisi untuk restart, retensi, konflik, replay error, pelupaan, noise holdout, confusion metrics, dan kalibrasi; runner memakai jaringan dan memori aktual.
@@ -37,13 +42,30 @@ MSRV di manifest adalah Rust 1.85. Jalankan gerbang di stable dan MSRV jika peru
 
 Pada verifikasi M10 di sandbox dengan Rust 1.97.1, `cargo fmt --all -- --check`, `cargo check --all-targets --all-features`, Clippy `-D warnings`, test debug, dan test release lulus setelah adaptive ensemble/gate. Runner M10 dan runner Iris juga lulus serta outputnya cocok dengan CSV tersimpan. Klaim ini tidak menggantikan verifikasi pada MSRV atau perangkat deployment.
 
+Tes integrasi sumber eksternal yang masih berlaku dapat dijalankan terpisah
+setelah memperoleh berkas yang tepat pada revisi allowlist:
+
+```sh
+SHELLA_STOPWORDS_ID=/path/stopwords-id.json \
+cargo test --test indonesian_stopwords_upstream -- --ignored
+
+SHELLA_HUNSPELL_DIC=/path/Indonesia.dic \
+SHELLA_HUNSPELL_AFF=/path/Indonesia.aff \
+cargo test --test indonesian_hunspell_upstream -- --ignored
+```
+
+Tes tersebut menolak byte yang tidak cocok dengan Git blob hash pada registry.
+Data stopwords, PUD, NusaX, dan IndoSum yang lisensinya diverifikasi berada di
+`data/language/`; GSD, CSUI, dan IndoNLI tidak dimuat karena izin data belum
+dapat diverifikasi. Lihat [inventaris sumber dan lisensi](./DATASET_BAHASA_INDONESIA.md).
+
 ## Benchmark
 
 `benches/learning.rs` mengukur tugas conditioning 32 epoch / dua pola dan evaluator reward, membandingkan recall learned dengan kontrol tanpa weight update. Harness melakukan warm-up dan tujuh batch × 100 run; hasil spesifik mesin tercatat di `docs/EVALUATOR_BENCHMARK.md`.
 
 `examples/milestone6_continual.rs` menjalankan 5 seed × 32 epoch per fase untuk 4 asosiasi yang berbagi cue; ini benchmark akurasi/retensi, bukan timing. Runner menulis hasil per seed ke `results/milestone6_continual_2026-10-19.csv`.
 
-`benches/system.rs` mengukur median lima batch untuk network 16/64/256 neuron dengan ring synapses dan delayed event, checkpoint save/restore 64 neuron, serta prefix/tag retrieval store berisi 256 record. Tidak ada warm-up terpisah pada benchmark system. Hasil bukan peak memory, beban multi-proses, atau jaminan performa deployment.
+`benches/system.rs` mengukur median lima batch untuk network 16/64/256 neuron dengan ring synapses dan delayed event, checkpoint save/restore 64 neuron, prefix/tag retrieval store berisi 256 record, serta reasoning 3 langkah pada jaringan 16 neuron dengan 16 pengalaman. Tidak ada warm-up terpisah pada benchmark system. Hasil bukan peak memory, beban multi-proses, atau jaminan performa deployment.
 
 `examples/capacity_probe.rs` dan `scripts/run_capacity_probe.sh` menjalankan workload terpisah untuk RSS/peak RSS Linux, build, median step, checkpoint save dan byte size sampai 16,384 neuron/65,536 sinaps. Hasil aktual Sandbox disimpan pada `results/capacity_sandbox_2026-10-19.csv` dan raw NDJSON; hasil tersebut bukan pengukuran perangkat pengguna.
 

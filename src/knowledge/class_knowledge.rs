@@ -358,16 +358,18 @@ impl ClassKnowledgeModel {
                 .collect::<Vec<_>>();
             let prototypes = candidate_prototypes[class_id].clone();
             let exemplars = select_exemplars(
-                training,
-                &training_rows,
-                &indices,
-                &candidate_prototypes,
-                &selected_exemplar_vectors,
-                &calibration,
+                ExemplarSelection {
+                    samples: training,
+                    rows: &training_rows,
+                    indices: &indices,
+                    prototypes: &candidate_prototypes,
+                    exemplar_vectors: &selected_exemplar_vectors,
+                    calibration: &calibration,
+                    dataset_version: &dataset_version,
+                    training_run_id: &training_run_id,
+                },
                 exemplar_policy.max_per_class,
                 class_id,
-                &dataset_version,
-                &training_run_id,
             );
             classes.push(ClassKnowledge {
                 class_id,
@@ -1121,18 +1123,32 @@ fn prototype_index(id: &str) -> usize {
         .unwrap_or(0)
 }
 
+struct ExemplarSelection<'a> {
+    samples: &'a [IrisSample],
+    rows: &'a [[f64; FEATURE_COUNT]],
+    indices: &'a [usize],
+    prototypes: &'a [Vec<Prototype>],
+    exemplar_vectors: &'a [Vec<[f64; FEATURE_COUNT]>],
+    calibration: &'a [CalibrationParameters; 3],
+    dataset_version: &'a str,
+    training_run_id: &'a str,
+}
+
 fn select_exemplars(
-    samples: &[IrisSample],
-    rows: &[[f64; FEATURE_COUNT]],
-    indices: &[usize],
-    prototypes: &[Vec<Prototype>],
-    exemplar_vectors: &[Vec<[f64; FEATURE_COUNT]>],
-    calibration: &[CalibrationParameters; 3],
+    selection: ExemplarSelection<'_>,
     maximum: usize,
     class_id: usize,
-    dataset_version: &str,
-    training_run_id: &str,
 ) -> Vec<Exemplar> {
+    let ExemplarSelection {
+        samples,
+        rows,
+        indices,
+        prototypes,
+        exemplar_vectors,
+        calibration,
+        dataset_version,
+        training_run_id,
+    } = selection;
     if indices.is_empty() {
         return Vec::new();
     }
