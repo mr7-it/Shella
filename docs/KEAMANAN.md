@@ -8,6 +8,8 @@ Checkpoint dan store ditulis ke file sementara eksklusif, disinkronkan, lalu dip
 
 `SecureMemoryStore` menyediakan jalur aman: payload dienkripsi AES-256-GCM dengan nonce acak dari OS, ciphertext ditandatangani Ed25519, lalu envelope JSON ditulis secara atomic. Signature diverifikasi sebelum dekripsi. Setiap mutasi mengambil sidecar lock hanya selama read-modify-write sehingga beberapa object/writer dapat bergantian secara serializable per mutasi. Ini bukan transaksi batch lintas beberapa mutasi.
 
+`ClassKnowledgeModel::save_secure`/`load_secure` menyimpan model sebagai record di `SecureMemoryStore`, sehingga mengikuti enkripsi, signature, verifikasi integritas, dan lock per mutasi. Test memakai key fixture tetap hanya untuk round-trip; rotasi kunci, backup, tenant isolation, approval governance, dan audit actor belum disediakan.
+
 Kunci enkripsi dan signing key harus 32-byte, dikelola secret manager, tidak dicatat ke log, tidak disimpan di repository, dan memiliki prosedur rotasi aplikasi sendiri. SecureMemoryStore belum menyediakan key rotation, backup terenkripsi, escrow, atau migrasi otomatis dari JSON legacy.
 
 ## Retensi dan embedding

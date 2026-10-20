@@ -4,7 +4,7 @@ mod restore;
 mod save;
 mod schema;
 
-pub use schema::RestoredState;
+pub use schema::{RestoredKnowledgeState, RestoredState};
 
 /// Operasi simpan/pulihkan checkpoint versi 1.
 pub struct Checkpoint;

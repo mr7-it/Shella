@@ -1,6 +1,6 @@
 use crate::{
-    LifNetwork, MemoryStore, NetworkStep, RewardEvaluator, RewardEvaluatorConfig, SimError,
-    TextEmbedding,
+    ClassKnowledgeModel, LegacyPrototypeSnapshot, LifNetwork, MemoryStore, NetworkStep,
+    RewardEvaluator, RewardEvaluatorConfig, SimError, TextEmbedding,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 
 const EXPERIENCE_VERSION: u32 = 1;
 const EXPERIENCE_PREFIX: &str = "learning/experience/";
+const CLASS_KNOWLEDGE_PREFIX: &str = "class-knowledge/model/";
 const MAX_IMPORTANCE: f64 = 10.0;
 const CONFLICT_SIMILARITY_THRESHOLD: f64 = 0.45;
 
@@ -264,6 +265,84 @@ impl LearningMemory {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Persist a validated versioned class model in the existing checksummed store.
+    pub fn save_class_knowledge(&mut self, model: &ClassKnowledgeModel) -> Result<(), SimError> {
+        model.validate()?;
+        validate_task_id(&model.training_run_id)?;
+        let value = serde_json::to_value(model).map_err(|error| SimError::SerializationFailed {
+            subsystem: "class knowledge",
+            reason: error.to_string(),
+        })?;
+        self.store.put(
+            format!("{CLASS_KNOWLEDGE_PREFIX}{}", model.training_run_id),
+            value,
+            &[],
+        )?;
+        Ok(())
+    }
+
+    /// Restore a versioned class model; integrity is checked by MemoryStore on open.
+    pub fn load_class_knowledge(
+        &self,
+        training_run_id: &str,
+    ) -> Result<Option<ClassKnowledgeModel>, SimError> {
+        validate_task_id(training_run_id)?;
+        let key = format!("{CLASS_KNOWLEDGE_PREFIX}{training_run_id}");
+        let Some(record) = self.store.get(&key) else {
+            return Ok(None);
+        };
+        let model: ClassKnowledgeModel =
+            serde_json::from_value(record.value().clone()).map_err(|error| {
+                SimError::CorruptData {
+                    subsystem: "class knowledge",
+                    reason: error.to_string(),
+                }
+            })?;
+        model.validate()?;
+        Ok(Some(model))
+    }
+
+    /// Explicitly migrate the old three single-center records without discarding their values.
+    pub fn migrate_legacy_prototypes(
+        &mut self,
+        legacy_task_id: &str,
+        training: &[crate::IrisSample],
+        validation: &[crate::IrisSample],
+        dataset_version: impl Into<String>,
+        training_run_id: impl Into<String>,
+        seed: u64,
+    ) -> Result<ClassKnowledgeModel, SimError> {
+        let mut centers = [[0.0; 4]; 3];
+        let mut seen = [false; 3];
+        for (class, features) in self.load_prototypes(legacy_task_id)? {
+            if class >= centers.len() || features.len() != 4 || seen[class] {
+                return Err(SimError::CorruptData {
+                    subsystem: "migrasi prototype legacy",
+                    reason: "kelas prototype lama duplikat atau dimensinya tidak valid".to_owned(),
+                });
+            }
+            centers[class].copy_from_slice(&features);
+            seen[class] = true;
+        }
+        if seen.iter().any(|present| !present) {
+            return Err(SimError::CorruptData {
+                subsystem: "migrasi prototype legacy",
+                reason: "prototype lama harus tersedia untuk ketiga kelas".to_owned(),
+            });
+        }
+        let snapshot = LegacyPrototypeSnapshot::new(centers)?;
+        let model = ClassKnowledgeModel::migrate_legacy(
+            snapshot,
+            training,
+            validation,
+            dataset_version,
+            training_run_id,
+            seed,
+        )?;
+        self.save_class_knowledge(&model)?;
+        Ok(model)
     }
 
     /// Menghapus seluruh pengalaman dari task eksperimen yang tidak lolos validasi.

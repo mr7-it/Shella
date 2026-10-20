@@ -12,6 +12,7 @@ pub mod config;
 pub mod decision;
 pub mod error;
 pub mod evaluator;
+pub mod knowledge;
 pub mod language;
 pub mod learning;
 pub mod memory;
@@ -31,7 +32,7 @@ pub use benchmark::{
     LongTermLearningRunResult, LongTermLearningTaskMetrics, SelfEvaluation, StratifiedFold,
     StratifiedSplit, TrainScaler, evaluate_predictions, noise, stratified_folds, stratified_split,
 };
-pub use checkpoint::{Checkpoint, RestoredState};
+pub use checkpoint::{Checkpoint, RestoredKnowledgeState, RestoredState};
 pub use config::LifConfig;
 pub use decision::{
     AbstentionReason, CalibrationEvaluator, CalibrationMetrics, Candidate, Decision,
@@ -40,6 +41,12 @@ pub use decision::{
 };
 pub use error::SimError;
 pub use evaluator::{RewardEvaluation, RewardEvaluator, RewardEvaluatorConfig, RewardMetrics};
+pub use knowledge::{
+    CalibrationParameters, ClassKnowledge, ClassKnowledgeInference, ClassKnowledgeModel,
+    ClassPrediction, Exemplar, ExemplarPolicy, ExemplarReason, FeatureDefinition, FeatureMetadata,
+    FeatureScaler, FeatureStatistics, FeatureType, IrisFeatures, LegacyPrototypeSnapshot,
+    ModelApprovalStatus, Prototype, PrototypeCandidateScore, SCORING_VERSION, feature_definitions,
+};
 pub use language::{EncodedText, TextEncoder, Vocabulary, normalize_text, tokenize};
 pub use learning::{
     ForgettingReport, LearningMemory, MemoryConflict, MemoryFeedbackWrite, MemoryInference,

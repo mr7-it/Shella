@@ -11,6 +11,18 @@ shella = { path = "../shella" }
 
 Versi minimum yang dinyatakan adalah Rust 1.85, edition 2024. Tipe error umum adalah `shella::SimError`; tidak ada panic yang dipakai untuk menolak input normal.
 
+## Class Knowledge Iris
+
+`ClassKnowledgeModel::fit(train, validation, dataset_version, training_run_id, seed)` membuat scaler dari train saja dan menguji `k = 2, 3, 4, 5, 6, 8` prototype per kelas di validation. Semua validation score disimpan di model; jika hasil seri, k yang lebih kecil dipilih. Test split tidak diterima pada fungsi fit.
+
+`fit_with_exemplar_policy(..., ExemplarPolicy::new(max_per_class)?)` mengatur budget exemplar per kelas (`1..=64`); `fit` menggunakan default dua. Urutan exemplar: representatif kelas, boundary margin rendah, lalu representatif cluster lain. Model memuat ID, versi, parent version dan status awal `Candidate`; ini bukan formal model registry atau approval workflow.
+
+Untuk resume terpadu, `Checkpoint::save_knowledge` menyimpan network, ClassKnowledge, mapping action neurons, dan evaluator opsional; `Checkpoint::restore_knowledge` mengembalikan `RestoredKnowledgeState` setelah validasi integrity.
+
+`predict([sepal_length, sepal_width, petal_length, petal_width])` mengembalikan class/prototype ID, score, margin, dan confidence Platt one-vs-rest yang di-fit dari validation. Score dan margin bukan probabilitas; confidence kalibrasi tidak otomatis menjamin kualitas di luar benchmark Iris. `infer_with_lif` mengukur probe baseline serta probe dengan arus knowledge pada LIF aktual. Persistence checksummed tersedia lewat `LearningMemory::save_class_knowledge`/`load_class_knowledge`; persistence terenkripsi tersedia lewat `ClassKnowledgeModel::save_secure`/`load_secure` dengan `SecureMemoryStore`.
+
+`LearningMemory::migrate_legacy_prototypes` secara eksplisit membaca satu pusat lama untuk tiap kelas, mempertahankan nilainya di `legacy_snapshot`, lalu membentuk model baru dari train/validation. Lihat [schema Class Knowledge](KNOWLEDGE_SCHEMA.md) untuk struktur dan batasan.
+
 ## Membuat jaringan dan mengirim arus
 
 ```rust

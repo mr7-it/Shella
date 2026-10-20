@@ -1,15 +1,13 @@
 use shella::{
-    DecisionMetrics, IrisSample, LearningMemory, LifConfig, LifNetwork, RewardModulatedStdpConfig,
-    SimError, StdpConfig, Synapse, evaluate_predictions, stratified_folds, stratified_split,
+    CalibrationEvaluator, ClassKnowledgeModel, DecisionMetrics, IrisSample, LearningMemory,
+    LifConfig, LifNetwork, RewardModulatedStdpConfig, SimError, StdpConfig, Synapse,
+    evaluate_predictions, stratified_folds, stratified_split,
 };
 use std::{
     error::Error,
     fs,
     path::{Path, PathBuf},
-    sync::{
-        Mutex, OnceLock,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 const INPUTS: usize = 4;
@@ -18,7 +16,6 @@ const NEURONS: usize = 7;
 const SEEDS: [u64; 5] = [17, 31, 47, 73, 101];
 const MEMORY_CURRENTS: [f64; 3] = [80.0, 140.0, 220.0];
 static TEMP_ID: AtomicU64 = AtomicU64::new(0);
-static CURRENT_PROTOTYPE: OnceLock<Mutex<Option<NeuralPrototype>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy)]
 struct Scale {
@@ -31,70 +28,52 @@ impl Scale {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct NeuralPrototype {
-    centers: [[f64; 4]; 3],
-}
-
-fn fit_prototype(samples: &[IrisSample], indices: &[usize], scaler: &Scale) -> NeuralPrototype {
-    let mut sums = [[0.0; 4]; 3];
-    let mut counts = [0.0_f64; 3];
-    for &index in indices {
-        let sample = &samples[index];
-        let scaled = scaler.apply(sample.features());
-        for feature in 0..4 {
-            sums[sample.label()][feature] += scaled[feature];
-        }
-        counts[sample.label()] += 1.0;
-    }
-    for class in 0..3 {
-        for value in &mut sums[class] {
-            *value /= counts[class].max(1.0);
-        }
-    }
-    NeuralPrototype { centers: sums }
-}
-
-fn install_prototype(prototype: NeuralPrototype) {
-    *CURRENT_PROTOTYPE
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .expect("prototype mutex") = Some(prototype);
-}
-
-fn load_prototype(memory: &LearningMemory) -> Result<NeuralPrototype, SimError> {
-    let mut centers = [[0.0; 4]; 3];
-    for (class, features) in memory.load_prototypes("iris-prototype")? {
-        if class >= 3 || features.len() != 4 {
-            return Err(SimError::CorruptData {
-                subsystem: "prototype neural",
-                reason: "dimensi prototype tidak sesuai".to_owned(),
-            });
-        }
-        centers[class].copy_from_slice(&features);
-    }
-    Ok(NeuralPrototype { centers })
-}
-
 fn main() -> Result<(), Box<dyn Error>> {
     let samples = load_iris("data/iris_uci.csv")?;
+    let mut prototype_validation_csv =
+        String::from("seed,prototypes_per_class,validation_accuracy,selected\n");
+    let mut calibration_csv = String::from("seed,split,samples,brier_score,mean_absolute_error\n");
+    let mut class_metrics_csv = String::from(
+        "seed,class_id,class_name,tp,fp,fn,tn,accuracy,precision,recall,f1,fpr,fnr,predicted_0,predicted_1,predicted_2\n",
+    );
     println!(
         "milestone,seed,mode,split,noise,accuracy,precision,recall,fpr,fnr,abstain,forgetting,weak,uncertainty,memory_records,cv_accuracy,replay_presentations"
     );
     for seed in SEEDS {
         let split = stratified_split(&samples, seed)?;
         let scaler = fit_scale(&samples, split.train())?;
-        let initial_prototype = fit_prototype(&samples, split.train(), &scaler);
-        install_prototype(initial_prototype);
+        let training = split
+            .train()
+            .iter()
+            .map(|index| samples[*index].clone())
+            .collect::<Vec<_>>();
+        let validation = split
+            .validation()
+            .iter()
+            .map(|index| samples[*index].clone())
+            .collect::<Vec<_>>();
+        let mut class_knowledge = ClassKnowledgeModel::fit(
+            &training,
+            &validation,
+            "iris-uci-v1",
+            format!("m11-{seed}"),
+            seed,
+        )?;
+        for candidate in &class_knowledge.prototype_candidate_scores {
+            prototype_validation_csv.push_str(&format!(
+                "{seed},{},{:.6},{}\n",
+                candidate.prototypes_per_class,
+                candidate.validation_accuracy,
+                candidate.prototypes_per_class == class_knowledge.selected_prototypes_per_class
+            ));
+        }
         let cv = run_cv(&samples, &split, seed)?;
         let path = std::env::temp_dir().join(format!(
             "shella-m11-{seed}-{}.json",
             TEMP_ID.fetch_add(1, Ordering::Relaxed)
         ));
         let mut memory = LearningMemory::open(&path)?;
-        for (class, center) in initial_prototype.centers.iter().enumerate() {
-            memory.record_prototype("iris-prototype", class, center)?;
-        }
+        memory.save_class_knowledge(&class_knowledge)?;
         let mut network = build_network(seed)?;
         let mut formed = 0;
         for &index in split.train() {
@@ -142,6 +121,38 @@ fn main() -> Result<(), Box<dyn Error>> {
             selected_current,
         )?;
         let test_external = evaluate_external(&memory, split.test(), &samples, &scaler, seed, 0.0)?;
+        let test_class_predictions = collect_class_knowledge_predictions(
+            &network,
+            &class_knowledge,
+            split.test(),
+            &samples,
+            &scaler,
+            seed,
+            0.0,
+        )?;
+        let test_class_knowledge = metrics_from_pairs(test_class_predictions.clone())?;
+        append_class_metrics(&mut class_metrics_csv, seed, &test_class_predictions);
+        let (brier_score, mean_absolute_error) = evaluate_class_knowledge_calibration(
+            &class_knowledge,
+            split.test(),
+            &samples,
+            &scaler,
+        )?;
+        calibration_csv.push_str(&format!(
+            "{seed},test,{},{brier_score:.6},{mean_absolute_error:.6}\n",
+            split.test().len()
+        ));
+        print_metrics(
+            seed,
+            "multi_prototype_lif",
+            "test",
+            0.0,
+            test_class_knowledge,
+            0.0,
+            class_knowledge.selected_prototypes_per_class * 3,
+            cv,
+            0,
+        );
         let test_noisy = evaluate_split(
             &network,
             Some(&memory),
@@ -264,44 +275,34 @@ fn main() -> Result<(), Box<dyn Error>> {
             replay_presentations,
         );
 
-        let validation_before_feedback = evaluate_split(
+        let validation_before_feedback = evaluate_class_knowledge(
             &network,
-            Some(&memory),
+            &class_knowledge,
             split.validation(),
             &samples,
             &scaler,
             seed,
             0.0,
-            selected_current,
         )?;
-        let weak_records = collect_records(
+        let weak_records = collect_class_knowledge_records(
             &network,
-            Some(&memory),
+            &class_knowledge,
             split.validation(),
             &samples,
             &scaler,
-            seed,
-            selected_current,
         )?;
         let self_eval = evaluate_predictions(&weak_records)?;
-        let prototype_before = CURRENT_PROTOTYPE
-            .get()
-            .and_then(|value| value.lock().ok().and_then(|guard| *guard))
-            .ok_or(SimError::InvalidInput {
-                parameter: "prototype",
-                reason: "prototype validation belum tersedia",
-            })?;
-        let mut adapted_prototype = prototype_before;
+        let mut candidate_knowledge = class_knowledge.clone();
         let mut candidate = network.clone();
         let mut feedback_replays = 0;
         for (index, (expected, predicted, margin)) in weak_records.iter().enumerate() {
             if predicted != &Some(*expected) || *margin < 0.15 {
                 let sample_index = split.validation()[index];
-                let feature = scaler.apply(samples[sample_index].features());
-                for (slot, value) in feature.iter().enumerate().take(INPUTS) {
-                    adapted_prototype.centers[*expected][slot] =
-                        0.8 * adapted_prototype.centers[*expected][slot] + 0.2 * value;
-                }
+                candidate_knowledge.apply_validation_feedback(
+                    *expected,
+                    predicted.unwrap_or((*expected + 1) % 3),
+                    0.1,
+                )?;
                 memory.record_feedback(
                     "iris-validation-feedback",
                     &memory_input(scaler.apply(samples[sample_index].features())),
@@ -319,33 +320,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                 feedback_replays += report.presentations();
             }
         }
-        *CURRENT_PROTOTYPE
-            .get_or_init(|| Mutex::new(None))
-            .lock()
-            .expect("prototype mutex") = Some(adapted_prototype);
-        let candidate_validation = evaluate_split(
+        candidate_knowledge.refit_calibration(&validation)?;
+        let candidate_validation = evaluate_class_knowledge(
             &candidate,
-            Some(&memory),
+            &candidate_knowledge,
             split.validation(),
             &samples,
             &scaler,
             seed,
             0.0,
-            selected_current,
         )?;
         let validation_after = if candidate_validation.accuracy().unwrap_or(0.0)
             >= validation_before_feedback.accuracy().unwrap_or(0.0)
         {
             network = candidate;
-            for (class, center) in adapted_prototype.centers.iter().enumerate() {
-                memory.record_prototype("iris-prototype", class, center)?;
-            }
+            class_knowledge = candidate_knowledge;
+            memory.save_class_knowledge(&class_knowledge)?;
             candidate_validation
         } else {
-            *CURRENT_PROTOTYPE
-                .get_or_init(|| Mutex::new(None))
-                .lock()
-                .expect("prototype mutex") = Some(prototype_before);
             memory.discard_task("iris-validation-feedback")?;
             validation_before_feedback
         };
@@ -366,31 +358,33 @@ fn main() -> Result<(), Box<dyn Error>> {
             cv,
             replay_presentations + feedback_replays
         );
-        let persistent_before = evaluate_split(
+        let persistent_before = evaluate_class_knowledge(
             &network,
-            Some(&memory),
+            &class_knowledge,
             split.test(),
             &samples,
             &scaler,
             seed,
             0.0,
-            selected_current,
         )?;
-        install_prototype(NeuralPrototype {
-            centers: [[0.0; 4]; 3],
-        });
+        let training_run_id = format!("m11-{seed}");
         drop(memory);
         let restored = LearningMemory::open(&path)?;
-        install_prototype(load_prototype(&restored)?);
-        let restored_test = evaluate_split(
+        let restored_knowledge =
+            restored
+                .load_class_knowledge(&training_run_id)?
+                .ok_or(SimError::CorruptData {
+                    subsystem: "class knowledge",
+                    reason: "model tidak tersedia setelah restart".to_owned(),
+                })?;
+        let restored_test = evaluate_class_knowledge(
             &network,
-            Some(&restored),
+            &restored_knowledge,
             split.test(),
             &samples,
             &scaler,
             seed,
             0.0,
-            selected_current,
         )?;
         print_metrics(
             seed,
@@ -405,6 +399,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
         cleanup(&path);
     }
+    fs::write(
+        "results/class_knowledge_validation_2026-10-19.csv",
+        prototype_validation_csv,
+    )?;
+    fs::write(
+        "results/class_knowledge_calibration_2026-10-19.csv",
+        calibration_csv,
+    )?;
+    fs::write(
+        "results/class_knowledge_per_class_2026-10-19.csv",
+        class_metrics_csv,
+    )?;
     Ok(())
 }
 
@@ -451,39 +457,6 @@ fn train_one(
 
 fn predict_neural(network: &LifNetwork, features: [f64; INPUTS]) -> Option<usize> {
     let mut probe = network.clone();
-    if let Some(prototype) = CURRENT_PROTOTYPE
-        .get()
-        .and_then(|value| value.lock().ok().and_then(|guard| *guard))
-    {
-        let mut currents = vec![0.0; NEURONS];
-        for (class, center) in prototype.centers.iter().enumerate() {
-            let distance = center
-                .iter()
-                .zip(features)
-                .map(|(expected, actual)| (expected - actual).powi(2))
-                .sum::<f64>();
-            currents[ACTIONS[class]] = 220.0 + (4.0 - distance).max(0.0) * 100.0;
-        }
-        let _ = probe.step(&currents);
-        return prototype
-            .centers
-            .iter()
-            .enumerate()
-            .min_by(|(_, left), (_, right)| {
-                let left_distance = left
-                    .iter()
-                    .zip(features)
-                    .map(|(expected, actual)| (expected - actual).powi(2))
-                    .sum::<f64>();
-                let right_distance = right
-                    .iter()
-                    .zip(features)
-                    .map(|(expected, actual)| (expected - actual).powi(2))
-                    .sum::<f64>();
-                left_distance.total_cmp(&right_distance)
-            })
-            .map(|(action, _)| action);
-    }
     let input = memory_input(features);
     let mut spikes = Vec::new();
     for current in [
@@ -565,6 +538,129 @@ fn predict_external(
     Ok(((scores[order[0]] > 0.0).then_some(order[0]), margin))
 }
 
+fn evaluate_class_knowledge(
+    network: &LifNetwork,
+    knowledge: &ClassKnowledgeModel,
+    indices: &[usize],
+    samples: &[IrisSample],
+    scaler: &Scale,
+    seed: u64,
+    noise: f64,
+) -> Result<DecisionMetrics, SimError> {
+    metrics_from_pairs(collect_class_knowledge_predictions(
+        network, knowledge, indices, samples, scaler, seed, noise,
+    )?)
+}
+
+fn collect_class_knowledge_predictions(
+    network: &LifNetwork,
+    knowledge: &ClassKnowledgeModel,
+    indices: &[usize],
+    samples: &[IrisSample],
+    scaler: &Scale,
+    seed: u64,
+    noise: f64,
+) -> Result<Vec<(usize, Option<usize>)>, SimError> {
+    let mut pairs = Vec::with_capacity(indices.len());
+    for (position, &index) in indices.iter().enumerate() {
+        let mut features = scaler.apply(samples[index].features());
+        for (feature, value) in features.iter_mut().enumerate() {
+            *value =
+                (*value + shella::noise(seed, index + position, feature, noise)).clamp(0.0, 1.0);
+        }
+        let mut probe = network.clone();
+        let inference =
+            knowledge.infer_normalized_primary_with_lif(&mut probe, features, &ACTIONS)?;
+        let predicted = inference
+            .prediction_from_network
+            .unwrap_or(inference.prediction_from_knowledge);
+        pairs.push((samples[index].label(), Some(predicted)));
+    }
+    Ok(pairs)
+}
+
+fn append_class_metrics(output: &mut String, seed: u64, pairs: &[(usize, Option<usize>)]) {
+    let class_names = ["Iris-setosa", "Iris-versicolor", "Iris-virginica"];
+    for class_id in 0..class_names.len() {
+        let mut tp = 0;
+        let mut fp = 0;
+        let mut false_negative = 0;
+        let mut tn = 0;
+        let mut confusion = [0; 3];
+        for (expected, predicted) in pairs {
+            let predicted = predicted.unwrap_or(usize::MAX);
+            if *expected == class_id && predicted < confusion.len() {
+                confusion[predicted] += 1;
+            }
+            match (*expected == class_id, predicted == class_id) {
+                (true, true) => tp += 1,
+                (false, true) => fp += 1,
+                (true, false) => false_negative += 1,
+                (false, false) => tn += 1,
+            }
+        }
+        let accuracy = if pairs.is_empty() {
+            0.0
+        } else {
+            (tp + tn) as f64 / pairs.len() as f64
+        };
+        let precision = ratio(tp, tp + fp);
+        let recall = ratio(tp, tp + false_negative);
+        let f1 = if precision + recall > 0.0 {
+            2.0 * precision * recall / (precision + recall)
+        } else {
+            0.0
+        };
+        let fpr = ratio(fp, fp + tn);
+        let fnr = ratio(false_negative, false_negative + tp);
+        output.push_str(&format!(
+            "{seed},{class_id},{},{tp},{fp},{false_negative},{tn},{accuracy:.6},{precision:.6},{recall:.6},{f1:.6},{fpr:.6},{fnr:.6},{},{},{}\n",
+            class_names[class_id], confusion[0], confusion[1], confusion[2]
+        ));
+    }
+}
+
+fn ratio(numerator: usize, denominator: usize) -> f64 {
+    if denominator == 0 {
+        0.0
+    } else {
+        numerator as f64 / denominator as f64
+    }
+}
+
+fn evaluate_class_knowledge_calibration(
+    knowledge: &ClassKnowledgeModel,
+    indices: &[usize],
+    samples: &[IrisSample],
+    scaler: &Scale,
+) -> Result<(f64, f64), SimError> {
+    let mut evaluator = CalibrationEvaluator::new();
+    for index in indices {
+        let normalized = scaler.apply(samples[*index].features());
+        let prediction = knowledge.predict_normalized_primary(normalized)?;
+        let confidence = prediction
+            .calibrated_confidence
+            .ok_or(SimError::CorruptData {
+                subsystem: "class calibration",
+                reason: "model tidak memiliki confidence Platt".to_owned(),
+            })?;
+        evaluator.record(confidence, prediction.class_id == samples[*index].label())?;
+    }
+    let metrics = evaluator.metrics();
+    Ok((
+        metrics.brier_score().ok_or(SimError::InvalidInput {
+            parameter: "calibration_samples",
+            reason: "split tidak memiliki sampel",
+        })?,
+        metrics
+            .mean_absolute_calibration_error()
+            .ok_or(SimError::InvalidInput {
+                parameter: "calibration_samples",
+                reason: "split tidak memiliki sampel",
+            })?,
+    ))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn evaluate_split(
     network: &LifNetwork,
@@ -617,28 +713,27 @@ fn evaluate_external(
     metrics_from_pairs(records)
 }
 
-fn collect_records(
+fn collect_class_knowledge_records(
     network: &LifNetwork,
-    memory: Option<&LearningMemory>,
+    knowledge: &ClassKnowledgeModel,
     indices: &[usize],
     samples: &[IrisSample],
     scaler: &Scale,
-    _seed: u64,
-    current: f64,
 ) -> Result<Vec<(usize, Option<usize>, f64)>, SimError> {
     indices
         .iter()
-        .enumerate()
-        .map(|(position, &index)| {
-            let x = scaler.apply(samples[index].features());
-            let (predicted, margin) = memory
-                .map_or(Ok((predict_neural(network, x), 0.0)), |store| {
-                    predict_memory(network, store, x, current)
-                })?;
+        .map(|index| {
+            let features = scaler.apply(samples[*index].features());
+            let prediction = knowledge.predict_normalized_primary(features)?;
+            let mut probe = network.clone();
+            let inference =
+                knowledge.infer_normalized_primary_with_lif(&mut probe, features, &ACTIONS)?;
             Ok((
-                samples[index].label(),
-                predicted,
-                margin + (position as f64 * 0.0),
+                samples[*index].label(),
+                inference
+                    .prediction_from_network
+                    .or(Some(inference.prediction_from_knowledge)),
+                prediction.margin,
             ))
         })
         .collect()

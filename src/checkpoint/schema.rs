@@ -1,4 +1,4 @@
-use crate::{LifNetwork, LifRuntime, RewardEvaluator};
+use crate::{ClassKnowledgeModel, LifNetwork, LifRuntime, RewardEvaluator};
 use serde::{Deserialize, Serialize};
 
 pub(super) const FORMAT_VERSION: u32 = 1;
@@ -13,6 +13,14 @@ pub struct RestoredState {
     pub evaluator: Option<RewardEvaluator>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RestoredKnowledgeState {
+    pub network: LifNetwork,
+    pub class_knowledge: ClassKnowledgeModel,
+    pub action_neurons: Vec<usize>,
+    pub evaluator: Option<RewardEvaluator>,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", content = "state")]
 pub(super) enum Payload {
@@ -22,6 +30,12 @@ pub(super) enum Payload {
     },
     SingleNeuronRuntime {
         runtime: LifRuntime,
+    },
+    KnowledgeNetwork {
+        network: LifNetwork,
+        class_knowledge: ClassKnowledgeModel,
+        action_neurons: Vec<usize>,
+        evaluator: Option<RewardEvaluator>,
     },
 }
 

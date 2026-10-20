@@ -49,6 +49,8 @@ Pada verifikasi M10 di sandbox dengan Rust 1.97.1, `cargo fmt --all -- --check`,
 
 ## Pengujian Milestone 11
 
+Regression `tests/milestone11_self_learning.rs` juga menguji fitur turunan/schema, scaler train-only, kandidat k deterministik, migrasi snapshot single-prototype, restart model, SecureMemoryStore, injeksi ke LIF, budget exemplar, calibration refit validation, dan deteksi payload/schema corrupt memakai `data/iris_uci.csv`. Runner release menulis hasil per seed ke `results/class_knowledge_enterprise_2026-10-19.csv`, skor kandidat k ke `results/class_knowledge_validation_2026-10-19.csv`, confusion/per-class metrics ke `results/class_knowledge_per_class_2026-10-19.csv`, dan Brier/MAE test dari kalibrator Platt validation ke `results/class_knowledge_calibration_2026-10-19.csv`. Pengujian belum mencakup drift/OOD, Mahalanobis singular fallback, ECE, dan benchmark lengkap noise/replay budget.
+
 `examples/milestone11_self_learning.rs` menjalankan lima seed dan menghasilkan 35 baris: tiga jalur test bersih, memory pada noise ±0.25, continual old-task setelah replay, self-loop validation, dan persistence setelah restart. Test Iris tidak dimasukkan ke memory sebelum evaluasi test. Scaler dan pemilihan memory current memakai train/validation saja; test hanya dievaluasi di akhir.
 
 Regression test `tests/milestone11_self_learning.rs` memverifikasi split disjoint, label stratified, train-only scaler, k-fold tanpa overlap, dan self-evaluation. Hasil M11 lengkap ada pada `LAPORAN_MILESTONE_11.md`.

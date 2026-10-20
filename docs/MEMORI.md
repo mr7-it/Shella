@@ -1,5 +1,11 @@
 # Memori persisten, embedding, dan secure storage M10
 
+## Class Knowledge M11
+
+`LearningMemory` menyimpan `ClassKnowledgeModel` pada key `class-knowledge/model/<training_run_id>` memakai checksum dan atomic write `MemoryStore`. Model memvalidasi versi schema, class, prototype, dan metadata saat restore. `migrate_legacy_prototypes` memerlukan tiga center lama, mempertahankan nilainya di snapshot, lalu fit multiprototype dari train/validation. `ClassKnowledgeModel::save_secure`/`load_secure` menggunakan `SecureMemoryStore`; jalur enkripsi dan signature existing tidak dilemahkan.
+
+Model memuat sepuluh fitur, min/max training, statistik kelas/prototype, skor kandidat k validation, exemplar ber-budget configurable, metadata model candidate/version, serta kalibrator Platt one-vs-rest yang fit hanya pada validation. `infer_with_lif` menjalankan baseline dan knowledge-injected probe pada network aktual. Drift detector, conflict registry, Mahalanobis, replay budget khusus knowledge, serta formal registry/approval multi-writer belum tersedia. Untuk angka terbaru gunakan [benchmark Class Knowledge](../results/class_knowledge_enterprise_2026-10-19.csv), [per-class metrics](../results/class_knowledge_per_class_2026-10-19.csv), dan [kalibrasi test](../results/class_knowledge_calibration_2026-10-19.csv); angka milestone di bagian bawah adalah snapshot eksperimen lama.
+
 ## MemoryStore backward-compatible
 
 `MemoryStore::open(path)` tetap menyediakan format JSON v1, checksum FNV-1a, atomic rename, dan mode single-writer untuk kompatibilitas data lama. `put_with_embedding` menyimpan vektor embedding numerik dan `search_embedding` mengurutkan record berdasarkan cosine similarity. `put_with_ttl` menyimpan TTL absolut; record expired dibersihkan saat open dan dapat dibersihkan eksplisit melalui `purge_expired`.

@@ -64,3 +64,13 @@ Hasil aktual tersimpan pada `results/milestone11_self_learning_release_2026-10-1
 ### Hasil perbaikan M11
 
 Setelah baseline di-commit, prototype readout train-only pada jalur LIF/STDP meningkatkan test accuracy neural tanpa memory menjadi `0.886666`, lebih tinggi daripada retrieval eksternal `0.673333`. Self-improvement validation-gated menaikkan validation rata-rata dari `0.900000` menjadi `0.966667` (`+0.066667`) melalui prototype adaptation, feedback memory, replay kandidat, dan rollback bila skor turun. Prototype konsolidasi juga dipersistenkan dan dipulihkan setelah restart.
+
+### Class Knowledge M11
+
+Modul `knowledge` mengganti jalur single-center di runner M11 dengan schema fitur Iris terversi: empat fitur asli dan enam turunan, scaler train-only, statistik, k-means deterministik, pemilihan jumlah prototype per kelas memakai validation (`k = 2, 3, 4, 5, 6, 8`), dan exemplar representatif/boundary. Migrasi eksplisit menyimpan tiga center lama lossless sebagai snapshot, kemudian membangun model aktif dari train/validation.
+
+`ClassKnowledgeModel` disimpan di `LearningMemory` atau `SecureMemoryStore`; `infer_with_lif` mengukur probe baseline dan probe dengan knowledge pada jaringan aktual. Benchmark release lima seed mencatat test accuracy rata-rata `0.973333` untuk mode multiprototype-LIF. Hasil per seed, kandidat validation, metrik per kelas/confusion matrix, dan calibration berada di `results/class_knowledge_enterprise_2026-10-19.csv`, `results/class_knowledge_validation_2026-10-19.csv`, `results/class_knowledge_per_class_2026-10-19.csv`, dan `results/class_knowledge_calibration_2026-10-19.csv`. Ini terbatas pada Iris dan tidak membuktikan kesiapan produksi.
+
+`Checkpoint::save_knowledge` mengemas network LIF/STDP, ClassKnowledge, mapping neuron aksi, dan evaluator dalam satu snapshot tervalidasi untuk restart.
+
+Confidence Class Knowledge memakai Platt one-vs-rest yang fit hanya pada validation; Brier/MAE test dicatat di `results/class_knowledge_calibration_2026-10-19.csv`. Sampel validation terbatas, jadi kalibrasi hanya teruji pada benchmark Iris. Drift detection, conflict registry, Mahalanobis scoring, replay budget khusus knowledge, model registry approval/rollback formal, dan audit trail actor belum tersedia. Rincian status ada di [schema Class Knowledge](docs/KNOWLEDGE_SCHEMA.md).
