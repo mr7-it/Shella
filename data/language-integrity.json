@@ -1,0 +1,373 @@
+{
+  "format_version": 1,
+  "external_files": {
+    "hunspell/Indonesia.aff": {
+      "size_bytes": 15081,
+      "sha256": "93b7629465525903f3b71e25a119da7c7ceb5ac32b5370a2b66d60c81d65aa3c",
+      "format": "text",
+      "encoding": "utf8"
+    },
+    "hunspell/Indonesia.dic": {
+      "size_bytes": 315353,
+      "sha256": "83a63fe811db2db9d1c71350de32b5762c6ef4639d9e82063ed8e17d5809416f",
+      "format": "text",
+      "encoding": "utf8"
+    }
+  },
+  "files": {
+    "indosum/README.txt": {
+      "size_bytes": 1801,
+      "sha256": "6f482c4bc3996688635e0a947e633767354d3a2564804edc777b0ba762d9a413",
+      "format": "text",
+      "encoding": "utf8"
+    },
+    "indosum/indosum.tar.gz": {
+      "size_bytes": 96037108,
+      "sha256": "34e5c504f711dd8ec0e87dbf10eb1dbaefca86717194f95a14476afeb8810108",
+      "format": "tar_gzip",
+      "encoding": "binary"
+    },
+    "nusax/LICENSE": {
+      "size_bytes": 20137,
+      "sha256": "5e436ff8ffbb77d8607220e9bce20c8915d860010feeb6c1ebef5a85688e9b39",
+      "format": "text",
+      "encoding": "utf8"
+    },
+    "nusax/lexicon/acehnese.csv": {
+      "size_bytes": 19322,
+      "sha256": "48ba2911df2a131bc2fb13d5cf6399b875e7bdb06fc5367867c73f02db7da55e",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/lexicon/balinese.csv": {
+      "size_bytes": 20173,
+      "sha256": "843fea727186b4d58cfabec72bd40c9ad270e15272a1817f610fcd58d4cab629",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/lexicon/banjarese.csv": {
+      "size_bytes": 16831,
+      "sha256": "7f2af3264e3601e2a5ea6089b5b03afab1c6c2c7332bf0dd205850dcf49535c0",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/lexicon/buginese.csv": {
+      "size_bytes": 20679,
+      "sha256": "fc1e0de2e2ebae91705b6698ee51ccb9f9c3154d3a5455d746c8a2e065621ba8",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/lexicon/english.csv": {
+      "size_bytes": 49092,
+      "sha256": "d4f3b66f210a6dc51fa1f5bde1ec34ed7083cf7beb86182f0346731cf4c06334",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/lexicon/javanese.csv": {
+      "size_bytes": 18518,
+      "sha256": "6a849835e3ed31ad69163ca54f32d13c3c6e2bb3c2150e7897ac972584fcc153",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/lexicon/madurese.csv": {
+      "size_bytes": 25501,
+      "sha256": "409ddc815de53dc0c4966bd69a9e69e771c9f07e666515f4aeceeef03deebd20",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/lexicon/minangkabau.csv": {
+      "size_bytes": 12655,
+      "sha256": "35329fe72757766f40458542c0e76d60a848a04dc2ecdfaa7c24120b85381aed",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/lexicon/ngaju.csv": {
+      "size_bytes": 15936,
+      "sha256": "46fc3d86b3aca9c33869d36906249fa72b9d6c33b518e5227781a65bf45ca61a",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/lexicon/sundanese.csv": {
+      "size_bytes": 19134,
+      "sha256": "43e86c4a28b1cf51712fb80018edd631ca44c17718751df8ff9a1e726c173f2f",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/lexicon/toba_batak.csv": {
+      "size_bytes": 32549,
+      "sha256": "1939848cf0d69398e0f6b31aa6f26891bfca75583e26ecb76bc0ef9ffeccc20b",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/mt/README.md": {
+      "size_bytes": 965,
+      "sha256": "4819bc4a4d7c0295c86f33eb6c082f9922b7bf3acd39ac32ad96dcd7079af39f",
+      "format": "text",
+      "encoding": "utf8"
+    },
+    "nusax/mt/test.csv": {
+      "size_bytes": 751242,
+      "sha256": "0082161de28a0a17a85fc6e02fc07a2e2514d8dd7f344ead95a88aa86dc706cc",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/mt/train.csv": {
+      "size_bytes": 935295,
+      "sha256": "cf4276730de04f0cb3369c48b67d454f4aae52646315f19eb71b908f5dfaae0e",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/mt/valid.csv": {
+      "size_bytes": 184467,
+      "sha256": "fd148ce931676460bb89ce94205f5cea3fb0fbd1fc4b561a016dc25ceb8e049a",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/README.md": {
+      "size_bytes": 1188,
+      "sha256": "d16df11560e34ed774ef37551e27cc09120e2759a7ef71f829a0e901f2c2df31",
+      "format": "text",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/acehnese/test.csv": {
+      "size_bytes": 65587,
+      "sha256": "0a38ac2352ec2194602f97acf5b25c78f432d84c9c9bee60c294506e55c18f1c",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/acehnese/train.csv": {
+      "size_bytes": 81366,
+      "sha256": "eeb72a3e29d6129af729a9112e296afe0b7bae3c4f6a2590d5532bafe57f4597",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/acehnese/valid.csv": {
+      "size_bytes": 16215,
+      "sha256": "1752fc429c3f7b12f29a72dd68d0e3939b21a40f389dd5d0eb5432c6d036b308",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/balinese/test.csv": {
+      "size_bytes": 67278,
+      "sha256": "d10c82f294bd72b0ee7077400424522e5c39fa477f83ffabb2f7652f84ed71fa",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/balinese/train.csv": {
+      "size_bytes": 83938,
+      "sha256": "e37accf45aec8381c7465b2ca2df75500c0c5991941f18a6f0e109d8a81e5c5b",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/balinese/valid.csv": {
+      "size_bytes": 16647,
+      "sha256": "1055ca278cc03de4743605c1bfac04261b4f6514fbbdba86587c2e3076e80197",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/banjarese/test.csv": {
+      "size_bytes": 66978,
+      "sha256": "cca90ae2c130ebd41f38a3d04acda1cc79b3795d5e43575a41d369c7326679d9",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/banjarese/train.csv": {
+      "size_bytes": 83884,
+      "sha256": "0e15c5826401ca8649c51e67a5c1ba6b0345d66897954e96ac073a85e717ee7a",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/banjarese/valid.csv": {
+      "size_bytes": 16541,
+      "sha256": "999a0bef291cde263777d64bde9d31b46fbf1de957a64e73f0fd39b8674784b1",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/buginese/test.csv": {
+      "size_bytes": 71091,
+      "sha256": "369fedd3463d406e98b88dbc7cce9a3ce1ac9d3947aad627f17826e68ee0b179",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/buginese/train.csv": {
+      "size_bytes": 88129,
+      "sha256": "23818aa30bf4ae743c540b007231c925e6f00f4dfd3ed8e38972b5663d601027",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/buginese/valid.csv": {
+      "size_bytes": 17263,
+      "sha256": "5425f886a49379cffd114802b0d3ef07de048d3f7e1647046a2c6dabd7284b0f",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/english/test.csv": {
+      "size_bytes": 69859,
+      "sha256": "63b49ae7c8fa9c72013dbc29477c9ca6b9f82e510f65df88a05635e36f4a979e",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/english/train.csv": {
+      "size_bytes": 88392,
+      "sha256": "d11297019c1f39c6a9bc855cf8bebd54aebd6c9c3e0e945cb8cb6a7999350e94",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/english/valid.csv": {
+      "size_bytes": 17123,
+      "sha256": "76ca81930332a857ee8c1a5d05a1523f4d91783d313a80bccb39836d80ad2655",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/indonesian/test.csv": {
+      "size_bytes": 67622,
+      "sha256": "43b612ed6fde972c752ab9fa8b2ce290d9ffa06b176b732fcef2a947cb94a161",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/indonesian/train.csv": {
+      "size_bytes": 84054,
+      "sha256": "698c4802111085c14fbe35122957e1145338d307bcc295764026a23095a32984",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/indonesian/valid.csv": {
+      "size_bytes": 16598,
+      "sha256": "4049c4a53017e08db72c72e1907345bfdfc19385481c58f54fe4637073d813f9",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/javanese/test.csv": {
+      "size_bytes": 65781,
+      "sha256": "ad73d2ee75854c4104c9188a84c757caa07f826e108a384ade7fbf0f6dcc53a2",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/javanese/train.csv": {
+      "size_bytes": 81845,
+      "sha256": "46a88ac0f2f0b09b42b7fb840d80f727cc5b2a558440cd29d3b69178c24853c5",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/javanese/valid.csv": {
+      "size_bytes": 16150,
+      "sha256": "ff8df9ec279e505c914bf7c367db5f10fcba672da8a0f7a32f8b701670e7a89c",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/madurese/test.csv": {
+      "size_bytes": 68020,
+      "sha256": "daf0d571942b7a716583f2f92257501278ab29f8a315a9074fc4aa4a63869be1",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/madurese/train.csv": {
+      "size_bytes": 84508,
+      "sha256": "0cc23e1d5f29cc94f30916e07f32809dd3995a8bbae2d19e78d4f88673a91c05",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/madurese/valid.csv": {
+      "size_bytes": 16770,
+      "sha256": "e1dc6c01128a40c13903e14ec3c51987ac47dacbbc527bd20e178294278296ad",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/minangkabau/test.csv": {
+      "size_bytes": 65752,
+      "sha256": "da055aabc671f0d702f73c50a90fde58ac0916ce30c4a23b6b0a589950909062",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/minangkabau/train.csv": {
+      "size_bytes": 81488,
+      "sha256": "96f11a39631fded49d04562e520199bcc9dcdbd07bfaee505753521d82388437",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/minangkabau/valid.csv": {
+      "size_bytes": 16157,
+      "sha256": "bca87a7e812cf13ac31c4fa9f0d4ac4c6dd2ba00999abd1687f01a1d89f37f3f",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/ngaju/test.csv": {
+      "size_bytes": 66893,
+      "sha256": "f8cd78d440d7d4cdc4fa556e80a546028fbfb0eaa173ff5156a39c3d42e9ca4f",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/ngaju/train.csv": {
+      "size_bytes": 82380,
+      "sha256": "db52af95941e56846296f9adcc58fa94cd41cd5ab17ce9ee10f20f3116d991ad",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/ngaju/valid.csv": {
+      "size_bytes": 16593,
+      "sha256": "a3061f5238852dcf296d92ebd103f1530e6e5832511e5a0a38fb85facd05fc80",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/sundanese/test.csv": {
+      "size_bytes": 67156,
+      "sha256": "887e940330e59716ff741ad11c4bccad6f94752c46de44858b32d46a96ef7d48",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/sundanese/train.csv": {
+      "size_bytes": 83603,
+      "sha256": "b525aefac4d9819add0375b8c0db49516f19b57fbf6e6fc5afda3069895f2168",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/sundanese/valid.csv": {
+      "size_bytes": 16462,
+      "sha256": "ca5bbbef8e7d8d085300e716e570b4f2a964a761b392a3612e5547dd7b5d0444",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/toba_batak/test.csv": {
+      "size_bytes": 68464,
+      "sha256": "11d15c3ab4079d7d97e80bfc1ce1a4245bd1909a3fa40e15806c1c6334a99309",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/toba_batak/train.csv": {
+      "size_bytes": 85784,
+      "sha256": "f6fed53a064607541c12a7f25dd16c5dc47b145ff7a75d844e18e3e50f80063f",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "nusax/sentiment/toba_batak/valid.csv": {
+      "size_bytes": 16940,
+      "sha256": "af3fdec7f6319b0e38e0ee7defb168ca741c1a56fac3dc3aa7a57dbab50967ea",
+      "format": "csv",
+      "encoding": "utf8"
+    },
+    "stopwords-id-LICENSE": {
+      "size_bytes": 1076,
+      "sha256": "27403c9741017239dc227eab9d6118c7c0569b199b42a853bd4ffbca898b1007",
+      "format": "text",
+      "encoding": "utf8"
+    },
+    "stopwords-id.json": {
+      "size_bytes": 7962,
+      "sha256": "d6f27439327774c3272c9299fb06b2ab6d7287f9a9c49031d64ba8e165bad558",
+      "format": "json",
+      "encoding": "utf8"
+    },
+    "ud-indonesian-pud/LICENSE.txt": {
+      "size_bytes": 19556,
+      "sha256": "b278eb53fe50b8bb7fa0d90fb8536c35fdcaa80f9d63812cb51db539555d2a89",
+      "format": "text",
+      "encoding": "utf8"
+    },
+    "ud-indonesian-pud/id_pud-ud-test.conllu": {
+      "size_bytes": 1161372,
+      "sha256": "07efad4d64863ab442aef820afdb34c269f80366c6efb583225f943e5baf88b2",
+      "format": "conllu",
+      "encoding": "utf8"
+    }
+  }
+}

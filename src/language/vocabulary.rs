@@ -2,9 +2,10 @@ use super::tokenize;
 use crate::{SimError, WordID};
 use hashbrown::HashMap;
 use serde::{Deserialize, Deserializer, Serialize, de::Error as DeError};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fs::File, io::Read, path::Path};
 
 const UNKNOWN_TOKEN: &str = "<unk>";
+const MAX_VOCABULARY_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Vocabulary terlatih dengan ID 0 khusus untuk token yang tidak dikenal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -14,6 +15,8 @@ pub struct Vocabulary {
     next_word_id: u64,
     #[serde(skip)]
     token_to_id: HashMap<String, u32>,
+    #[serde(skip)]
+    id_to_index: HashMap<WordID, usize>,
 }
 
 impl Vocabulary {
@@ -57,13 +60,16 @@ impl Vocabulary {
         tokens.push(UNKNOWN_TOKEN.to_owned());
         tokens.extend(entries.into_iter().map(|(token, _)| token));
         let mut token_to_id = HashMap::with_capacity(tokens.len());
+        let mut id_to_index = HashMap::with_capacity(tokens.len());
         let mut word_ids = Vec::with_capacity(tokens.len());
         for (index, token) in tokens.iter().enumerate() {
             let id = u32::try_from(index).map_err(|_| SimError::CounterOverflow {
                 counter: "ID token",
             })?;
             token_to_id.insert(token.clone(), id);
-            word_ids.push(WordID::new(u64::from(id)));
+            let word_id = WordID::new(u64::from(id));
+            id_to_index.insert(word_id, index);
+            word_ids.push(word_id);
         }
         Ok(Self {
             next_word_id: u64::try_from(tokens.len())
@@ -71,16 +77,17 @@ impl Vocabulary {
             tokens,
             word_ids,
             token_to_id,
+            id_to_index,
         })
     }
 
-    /// Encode token menjadi ID; token di luar vocabulary menggunakan ID 0.
+    /// Lookup token kanonis; token di luar vocabulary menggunakan ID 0.
     #[must_use]
     pub fn id(&self, token: &str) -> u32 {
         self.token_to_id.get(token).copied().unwrap_or(0)
     }
 
-    /// ID persisten bertipe untuk kata; kata di luar vocabulary menggunakan ID 0.
+    /// ID bertipe untuk token kanonis; kata di luar vocabulary menggunakan ID 0.
     #[must_use]
     pub fn word_id(&self, token: &str) -> WordID {
         self.word_ids
@@ -89,13 +96,28 @@ impl Vocabulary {
             .unwrap_or_else(|| WordID::new(0))
     }
 
+    /// Cari satu kata setelah normalisasi; frasa dan input tanpa token tidak cocok.
+    pub fn lookup_word(&self, text: &str) -> Result<Option<WordID>, SimError> {
+        if text == UNKNOWN_TOKEN {
+            return Ok(Some(WordID::new(0)));
+        }
+        let tokens = tokenize(text)?;
+        if tokens.len() != 1 {
+            return Ok(None);
+        }
+        Ok(self
+            .token_to_id
+            .get(&tokens[0])
+            .and_then(|index| self.word_ids.get(*index as usize))
+            .copied())
+    }
+
     /// Mendapatkan ejaan kata berdasarkan ID stabil yang tersimpan.
     #[must_use]
     pub fn word(&self, id: WordID) -> Option<&str> {
-        self.word_ids
-            .iter()
-            .position(|word_id| *word_id == id)
-            .and_then(|index| self.tokens.get(index))
+        self.id_to_index
+            .get(&id)
+            .and_then(|index| self.tokens.get(*index))
             .map(String::as_str)
     }
 
@@ -151,9 +173,13 @@ impl Vocabulary {
         self.token_to_id
             .try_reserve(1)
             .map_err(|_| SimError::AllocationFailed)?;
+        self.id_to_index
+            .try_reserve(1)
+            .map_err(|_| SimError::AllocationFailed)?;
         let word_id = WordID::new(self.next_word_id);
         self.tokens.push(token.clone());
         self.word_ids.push(word_id);
+        self.id_to_index.insert(word_id, self.tokens.len() - 1);
         self.token_to_id.insert(token, token_index);
         self.next_word_id = next_word_id;
         Ok(word_id)
@@ -184,10 +210,95 @@ impl Vocabulary {
         Ok(tokenize(text)?.iter().map(|token| self.id(token)).collect())
     }
 
+    /// Encode teks menjadi ID kata stabil setelah normalisasi dan tokenisasi.
+    pub fn encode_word_ids(&self, text: &str) -> Result<Vec<WordID>, SimError> {
+        Ok(tokenize(text)?
+            .iter()
+            .map(|token| self.word_id(token))
+            .collect())
+    }
+
+    /// Decode ID stabil ke ejaan kanonis vocabulary; `WordID(0)` menjadi `<unk>`.
+    ///
+    /// Huruf besar, tanda baca, dan bentuk Unicode sebelum normalisasi tidak
+    /// dipertahankan oleh tokenisasi; kata yang tersimpan dikembalikan apa adanya.
+    pub fn decode_word_ids(&self, ids: &[WordID]) -> Result<Vec<String>, SimError> {
+        ids.iter()
+            .map(|id| {
+                self.word(*id)
+                    .map(str::to_owned)
+                    .ok_or(SimError::InvalidInput {
+                        parameter: "word_id",
+                        reason: "ID tidak dikenal oleh vocabulary",
+                    })
+            })
+            .collect()
+    }
+
+    /// Simpan vocabulary sebagai JSON tervalidasi melalui atomic replace.
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<(), SimError> {
+        self.validate()?;
+        let bytes = serde_json::to_vec(self).map_err(|error| SimError::SerializationFailed {
+            subsystem: "vocabulary",
+            reason: error.to_string(),
+        })?;
+        if bytes.len() as u64 > MAX_VOCABULARY_BYTES {
+            return Err(SimError::CorruptData {
+                subsystem: "vocabulary",
+                reason: "snapshot melebihi batas ukuran 64 MiB".to_owned(),
+            });
+        }
+        crate::checkpoint::atomic_write(
+            path.as_ref(),
+            &bytes,
+            "vocabulary",
+            "simpan vocabulary atomik",
+        )
+    }
+
+    /// Pulihkan vocabulary JSON dengan batas ukuran dan validasi mapping dua arah.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, SimError> {
+        let file = File::open(path).map_err(|error| SimError::Io {
+            operation: "buka vocabulary",
+            kind: error.kind(),
+        })?;
+        let length = file
+            .metadata()
+            .map_err(|error| SimError::Io {
+                operation: "baca metadata vocabulary",
+                kind: error.kind(),
+            })?
+            .len();
+        if length > MAX_VOCABULARY_BYTES {
+            return Err(SimError::CorruptData {
+                subsystem: "vocabulary",
+                reason: "snapshot melebihi batas ukuran 64 MiB".to_owned(),
+            });
+        }
+        let mut bytes = Vec::with_capacity(length as usize);
+        file.take(MAX_VOCABULARY_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| SimError::Io {
+                operation: "baca vocabulary",
+                kind: error.kind(),
+            })?;
+        if bytes.len() as u64 > MAX_VOCABULARY_BYTES {
+            return Err(SimError::CorruptData {
+                subsystem: "vocabulary",
+                reason: "snapshot melebihi batas ukuran 64 MiB".to_owned(),
+            });
+        }
+        serde_json::from_slice(&bytes).map_err(|error| SimError::CorruptData {
+            subsystem: "vocabulary",
+            reason: error.to_string(),
+        })
+    }
+
     /// Validasi invariant struktur saat vocabulary dipulihkan dari penyimpanan.
     pub(crate) fn validate(&self) -> Result<(), SimError> {
         if self.tokens.first().map(String::as_str) != Some(UNKNOWN_TOKEN)
             || self.token_to_id.len() != self.tokens.len()
+            || self.id_to_index.len() != self.word_ids.len()
             || self.word_ids.len() != self.tokens.len()
             || self
                 .word_ids
@@ -204,6 +315,12 @@ impl Vocabulary {
                 .any(|word_id| word_id.get() >= self.next_word_id)
             || self.tokens.iter().enumerate().any(|(index, token)| {
                 self.token_to_id.get(token) != u32::try_from(index).ok().as_ref()
+                    || self.id_to_index.get(&self.word_ids[index]) != Some(&index)
+            })
+            || self.tokens.iter().skip(1).any(|token| {
+                tokenize(token).map_or(true, |normalized| {
+                    normalized.len() != 1 || normalized.first() != Some(token)
+                })
             })
         {
             return Err(SimError::InvalidInput {
@@ -258,11 +375,15 @@ impl<'de> Deserialize<'de> for Vocabulary {
             stored.next_word_id
         };
         let mut token_to_id = HashMap::with_capacity(stored.tokens.len());
+        let mut id_to_index = HashMap::with_capacity(stored.tokens.len());
         for (index, token) in stored.tokens.iter().enumerate() {
             let id = u32::try_from(index)
                 .map_err(|_| D::Error::custom("jumlah kata melampaui ID vocabulary"))?;
             if token_to_id.insert(token.clone(), id).is_some() {
                 return Err(D::Error::custom("token vocabulary duplikat"));
+            }
+            if id_to_index.insert(word_ids[index], index).is_some() {
+                return Err(D::Error::custom("WordID vocabulary duplikat"));
             }
         }
         if !stored.token_to_id.is_empty()
@@ -282,6 +403,7 @@ impl<'de> Deserialize<'de> for Vocabulary {
             word_ids,
             next_word_id,
             token_to_id,
+            id_to_index,
         };
         vocabulary
             .validate()

@@ -24,12 +24,41 @@ WordNet Bahasa pada URL yang diajukan tidak ditemukan tersedia saat diperiksa
 (404). Kamus Hunspell bukan salah satu dari sepuluh dataset permintaan ini;
 loader/provenance yang sudah ada tetap terpisah.
 
-## API runtime
+## Manifest integritas dan verifikasi
+
+`data/language-integrity.json` memuat entry untuk semua **59 file** di
+`data/language/`: ukuran dalam byte, SHA-256, format, dan encoding. Arsip
+IndoSum ditandai binary gzip; seluruh CSV, JSON, CoNLL-U, README, dan notice
+lisensi harus UTF-8. `DatasetIntegrityManifest::verify_directory` menolak
+checksum/ukuran salah, file hilang atau ekstra, format dasar tidak valid, dan
+UTF-8 rusak. Loader yang memverifikasi file sumber juga menghitung SHA-256
+streaming dan mencocokkannya dengan manifest selain verifikasi Git blob SHA-1.
+Manifest juga mencatat dua entry eksternal Hunspell (ukuran 315,353 byte untuk
+`Indonesia.dic` dan 15,081 byte untuk `Indonesia.aff`) beserta SHA-256. File
+dictionary tidak dibundel; `verify-source` memverifikasi input lokalnya.
+
+Jalankan audit lengkap dari root repository:
+
+```sh
+cargo run --bin dataset-integrity -- verify data/language data/language-integrity.json
+cargo run --bin dataset-integrity -- verify-source hunspell_dictionaries Indonesia.dic /path/to/Indonesia.dic
+```
+
+Perintah `generate` dapat membuat manifest baru, tetapi hanya menghitung ulang
+checksum dari file lokal dan **bukan** bukti provenance atau keaslian revisi.
+Setelah membuatnya, cocokkan file dengan revisi upstream, Git blob checksum,
+lisensi, ukuran, dan format yang dimaksud sebelum menerima perubahan manifest.
+Manifest tidak ditandatangani; ia mendeteksi perubahan tak terduga selama nilai
+manifest terjaga di version control, bukan serangan yang mengubah data dan
+manifest sekaligus.
 
 `LicenseRegistry::verified_sources()` hanya menyetujui stopwords-id, PUD,
-NusaX, IndoSum, dan sumber Hunspell terdahulu. `DatasetLoader` menolak berkas
-yang Git blob SHA-1-nya tidak cocok dengan revisi registry. Batas pembacaan dan
-validasi skema diterapkan sebelum hasil dikembalikan.
+NusaX, IndoSum, dan sumber Hunspell terdahulu. File sumber yang dibundel
+diverifikasi dengan ukuran, Git blob SHA-1, dan SHA-256 pinned; struktur skema
+kemudian divalidasi parser masing-masing. Batas pembacaan tetap diberlakukan.
+Hunspell dimuat dari file lokal eksternal yang tidak dibundel. Revision/ukuran/
+SHA-1 Git blob dan SHA-256 berkas eksternal sama-sama diverifikasi saat loader
+membacanya.
 
 Contoh path dari root repository:
 

@@ -47,6 +47,14 @@ fn encoder_menghasilkan_currents_deterministik_dan_validasi_input() {
     let encoded = encoder.encode("BETA alpha beta", 4, 0.25).expect("encode");
     assert_eq!(encoded.tokens(), ["beta", "alpha", "beta"]);
     assert_eq!(encoded.token_ids(), [1, 2, 1]);
+    assert_eq!(
+        encoded.word_ids(),
+        [
+            shella::WordID::new(1),
+            shella::WordID::new(2),
+            shella::WordID::new(1)
+        ]
+    );
     assert_eq!(encoded.currents_na().iter().sum::<f64>(), 0.75);
     assert_eq!(
         encoded,

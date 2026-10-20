@@ -61,17 +61,23 @@ pub(super) fn write_payload(path: &Path, payload_json: String) -> Result<(), Sim
             "checkpoint melebihi batas ukuran 256 MiB",
         ));
     }
-    atomic_write(path, &bytes)
+    atomic_write(path, &bytes, "checkpoint", "tulis checkpoint atomik")
 }
 
-pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), SimError> {
+pub(crate) fn atomic_write(
+    path: &Path,
+    bytes: &[u8],
+    subsystem: &'static str,
+    operation: &'static str,
+) -> Result<(), SimError> {
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| invalid_checkpoint("jalur tujuan tidak memiliki nama file"))?;
+    let file_name = path.file_name().ok_or_else(|| SimError::CorruptData {
+        subsystem,
+        reason: "jalur tujuan tidak memiliki nama file".to_owned(),
+    })?;
     let mut temporary = PathBuf::from(parent);
     let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let mut temporary_name = file_name.to_os_string();
@@ -85,14 +91,13 @@ pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), SimError> {
         options.mode(0o600);
         let mut file = options
             .open(&temporary)
-            .map_err(|error| io_error("buat file sementara checkpoint", error))?;
+            .map_err(|error| io_error(operation, error))?;
         file.write_all(bytes)
-            .map_err(|error| io_error("tulis checkpoint", error))?;
+            .map_err(|error| io_error(operation, error))?;
         file.sync_all()
-            .map_err(|error| io_error("sinkronkan checkpoint", error))?;
+            .map_err(|error| io_error(operation, error))?;
         drop(file);
-        fs::rename(&temporary, path)
-            .map_err(|error| io_error("pasang checkpoint atomik", error))?;
+        fs::rename(&temporary, path).map_err(|error| io_error(operation, error))?;
         if let Ok(directory) = File::open(parent) {
             let _ = directory.sync_all();
         }

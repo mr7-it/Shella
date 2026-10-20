@@ -454,6 +454,7 @@ impl LicenseRegistry {
                 })?;
         let header = format!("blob {length}\0");
         let mut hasher = sha1::Sha1::new();
+        let mut sha256_hasher = sha2::Sha256::new();
         hasher.update(header.as_bytes());
         let mut buffer = [0_u8; 16 * 1024];
         let mut remaining = length;
@@ -472,6 +473,7 @@ impl LicenseRegistry {
                 });
             }
             hasher.update(&buffer[..read]);
+            sha256_hasher.update(&buffer[..read]);
             remaining -= read as u64;
         }
         let mut extra = [0_u8; 1];
@@ -492,6 +494,8 @@ impl LicenseRegistry {
                 reason: "Git blob SHA-1 tidak cocok dengan file pada commit terdaftar".to_owned(),
             });
         }
+        let sha256 = format!("{:x}", sha256_hasher.finalize());
+        super::integrity::verify_source_sha256(id, file_path, length, &sha256)?;
         Ok(())
     }
 }

@@ -91,6 +91,29 @@ checkpoint checksummed. `ReasoningEngine::reason_text` mengubah teks menjadi aru
 pada representasi neuron yang kompatibel, lalu melewati reasoning dan retrieval
 memory biasa. Ini adalah representasi terikat eksplisit, bukan embedding semantik.
 
+Untuk serialisasi vocabulary mandiri, `Vocabulary::save(path)` melakukan atomic
+replace dan `Vocabulary::load(path)` memvalidasi ulang ID serta indeks dua arah.
+`encode_word_ids`/`decode_word_ids` memakai ID bertipe stabil; `WordID(0)` secara
+eksplisit merepresentasikan `<unk>`, sedangkan ID lain yang tidak dikenal ditolak.
+`TextEncoder::encode` tetap mempertahankan field `token_ids` positional demi
+kompatibilitas dan menyediakan `word_ids` bertipe untuk penggunaan baru.
+
+Integritas semua file data yang dibundel dapat diverifikasi ulang:
+
+```rust
+use shella::DatasetIntegrityManifest;
+
+let manifest = DatasetIntegrityManifest::bundled()?;
+let report = manifest.verify_directory("data/language")?;
+assert_eq!(report.files_verified, 59);
+# Ok::<(), shella::SimError>(())
+```
+
+File Hunspell eksternal tidak ikut diverifikasi oleh `verify_directory`; dua
+checksumnya dicatat pada manifest yang sama dan diverifikasi saat `load_hunspell_files`
+membaca file. CLI `dataset-integrity verify-source hunspell_dictionaries
+Indonesia.dic /path/to/Indonesia.dic` melakukan pemeriksaan terpisah.
+
 Untuk pembelajaran jangka panjang, `LearningMemory::open(path)` memulihkan pengalaman persisten. `record_feedback` menyimpan hasil evaluasi, `recall_similar` melakukan cosine retrieval, `infer_with_memory` menginjeksikan support ke neuron aksi LIF, `replay_relevant` menjalankan ulang pengalaman melalui reward-modulated STDP, `find_conflicts` mendeteksi label berbeda pada fitur mirip, `consolidate` melindungi asosiasi penting, dan `decay_irrelevant` melakukan pelupaan terkontrol. Retrieval score bukan probabilitas.
 
 `TextEmbedding::from_text` membuat embedding hashing token/character n-gram deterministik. `MemoryStore::put_with_embedding` dan `search_embedding` menyediakan retrieval embedding; `LearningMemory::record_text_feedback` dan `recall_text_similar` menghubungkan embedding tersebut ke pengalaman pembelajaran. `MemoryStore::put_with_ttl` serta `purge_expired` menyediakan TTL otomatis.

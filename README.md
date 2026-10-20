@@ -20,6 +20,11 @@
 
 `LanguageNetwork` menyediakan ID kata/subword/neuron/sinaps stabil, representasi kata terdistribusi, koneksi sinaptik aktual, dan checkpoint bersama jaringan. Lookup vocabulary memakai hashbrown SwissTable, tetapi nilai hash tidak dipakai sebagai ID. `TextEncoder` lama tetap memakai proyeksi modulo untuk kompatibilitas dan dapat mengalami collision. Pipeline teks bukan model semantik penuh, pemahaman bahasa, generator, atau decoder; `TextEmbedding` tetap hashing lexical dan dapat collision. `MemoryStore` lama tetap JSON single-writer; gunakan `SecureMemoryStore` untuk enkripsi/signature dan writer bergantian. Rotasi kunci, backup, serta key management tetap tanggung jawab aplikasi. Benchmark mengukur perilaku protokol sintetis dan tidak membuktikan generalisasi, performa aplikasi, ataupun efisiensi energi.
 
+Integritas berkas dataset terbundel dapat diperiksa dengan
+`cargo run --bin dataset-integrity -- verify data/language data/language-integrity.json`.
+Manifest mencakup SHA-256, ukuran, format, dan encoding; lihat
+[inventaris dan batasan dataset](docs/DATASET_BAHASA_INDONESIA.md).
+
 `ReasoningEngine::confidence()` adalah skor heuristik; bukan probabilitas.
 `calibrated_confidence()` hanya tersedia setelah Platt fit menggunakan ID validation
 dan ID evaluation non-overlap, dengan Brier/MAE diukur pada data evaluation.
@@ -43,6 +48,7 @@ cargo test --all-targets --locked
 cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo bench --bench learning --locked
 cargo bench --bench system --locked
+cargo bench --bench language --locked
 ```
 
 Dalam proyek Rust lain, tambahkan dependensi bernama `shella`, lalu impor API dari crate `shella`. Contoh integrasi ada di [Panduan API](docs/API.md) dan [SDK](docs/SDK.md). Dependency langsung dan transitif tercatat di `Cargo.toml` serta `Cargo.lock`.

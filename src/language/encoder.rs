@@ -1,11 +1,12 @@
 use super::{Vocabulary, tokenize};
-use crate::SimError;
+use crate::{SimError, WordID};
 
 /// Representasi tekstual terstruktur untuk audit dan integrasi jaringan.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EncodedText {
     tokens: Vec<String>,
     token_ids: Vec<u32>,
+    word_ids: Vec<WordID>,
     currents_na: Vec<f64>,
 }
 impl EncodedText {
@@ -18,6 +19,11 @@ impl EncodedText {
     #[must_use]
     pub fn token_ids(&self) -> &[u32] {
         &self.token_ids
+    }
+    /// Stable vocabulary identities corresponding to the normalized tokens.
+    #[must_use]
+    pub fn word_ids(&self) -> &[WordID] {
+        &self.word_ids
     }
     /// Vektor arus hasil proyeksi hash ID token ke indeks neuron.
     #[must_use]
@@ -76,6 +82,10 @@ impl TextEncoder {
             .iter()
             .map(|token| self.vocabulary.id(token))
             .collect();
+        let word_ids = tokens
+            .iter()
+            .map(|token| self.vocabulary.word_id(token))
+            .collect();
         let mut currents_na = vec![0.0; neuron_count];
         for id in &token_ids {
             let index = (*id as usize) % neuron_count;
@@ -89,6 +99,7 @@ impl TextEncoder {
         Ok(EncodedText {
             tokens,
             token_ids,
+            word_ids,
             currents_na,
         })
     }

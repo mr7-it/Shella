@@ -8,7 +8,8 @@ mod vocabulary;
 
 pub use encoder::{EncodedText, TextEncoder};
 pub use indonesian::{
-    DatasetId, DatasetLoadReport, DatasetLoader, DatasetProvenance, HunspellAffixKind,
+    DatasetEncoding, DatasetFileFormat, DatasetFileIntegrity, DatasetId, DatasetIntegrityManifest,
+    DatasetIntegrityReport, DatasetLoadReport, DatasetLoader, DatasetProvenance, HunspellAffixKind,
     HunspellAffixRule, HunspellAnalysis, HunspellRoot, IndoSumArticle, IndoSumCorpus,
     IndoSumPartition, IndoSumRouge1, IndonesianVocabulary, LexicalAnalysis, LexicalRelation,
     LexicalRelationType, LexiconEntry, LexiconEntryInput, LexiconMetadata, LicenseRegistry,

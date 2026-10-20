@@ -2,7 +2,9 @@
 
 Pipeline bahasa hanya preprocessing dan representasi sederhana. `normalize_text` melakukan Unicode NFC, lowercase, dan merapatkan whitespace. `tokenize` menjadikan run karakter Unicode alfanumerik sebagai token dan tanda baca sebagai separator. `Vocabulary::fit(corpus, min_frequency, max_tokens)` membangun vocabulary dari korpus yang diberikan; urutan token adalah frekuensi menurun lalu leksikografis, dengan `<unk>` pada ID 0. `Vocabulary::encode` memetakan kata di luar kamus ke `<unk>`.
 
-`TextEncoder::encode(text, neuron_count, current_per_token_na)` mengembalikan token, ID, dan vektor arus. Setiap occurrence menambah arus positif pada neuron `token_id % neuron_count`. Ini bag-of-token deterministic dengan collision; tidak merepresentasikan tata bahasa, makna, konteks, embedding, subword, klasifikasi terlatih, atau generasi teks. Vocabulary harus di-fit pada data latih oleh pemanggil sebelum dipakai pada data evaluasi; jangan fit ulang dari data uji bila ingin evaluasi tanpa kebocoran.
+`TextEncoder::encode(text, neuron_count, current_per_token_na)` mengembalikan token, ID positional lama (`token_ids`), `WordID` stabil (`word_ids`), dan vektor arus. Setiap occurrence menambah arus positif pada neuron `token_id % neuron_count`. Ini bag-of-token deterministik dengan collision; tidak merepresentasikan tata bahasa, makna, konteks, embedding, subword, klasifikasi terlatih, atau generasi teks. Vocabulary harus di-fit pada data latih oleh pemanggil sebelum dipakai pada data evaluasi; jangan fit ulang dari data uji bila ingin evaluasi tanpa kebocoran.
+
+`Vocabulary::lookup_word` menormalisasi input satu kata untuk lookup, sedangkan `id`/`word_id` menyediakan jalur lookup cepat atas token yang sudah kanonis. `Vocabulary::encode_word_ids` dan `decode_word_ids` mendukung round-trip melalui identitas kata stabil. Decoder mengembalikan ejaan kanonis yang tersimpan; tokenisasi mengubah input menjadi NFC/lowercase, memisahkan tanda baca, dan OOV memakai `WordID(0)`/`<unk>`. ID lain yang tidak ditemukan adalah error. `Vocabulary::save`/`load` memakai snapshot JSON tervalidasi dan atomic replace; ID lama dipertahankan saat kosakata diperluas setelah pemulihan.
 
 
 `TextEncoder::encode` menolak input yang setelah normalisasi/tokenisasi tidak menghasilkan token (termasuk teks kosong, whitespace-only, dan punctuation-only). `tokenize` tetap dapat dipakai sebagai tokenizer umum dan mengembalikan daftar kosong untuk input seperti itu. Token OOV tetap dipetakan ke ID `<unk>` 0; encoder belum menyediakan rasio OOV atau keputusan unknown.
@@ -15,7 +17,17 @@ resmi yang terverifikasi sekarang disimpan terpisah dari source code di
 Indonesian-PUD (CC BY-SA 3.0), dataset NusaX (CC BY-SA 4.0), dan IndoSum
 (CC BY-SA 4.0); versi, ukuran, atribusi, scope, dan keterbatasan pemakaian
 dicatat dalam [inventaris dataset](./DATASET_BAHASA_INDONESIA.md). Loader
-memeriksa Git blob SHA-1 atau SHA-256 archive yang dipin sebelum parsing.
+memeriksa ukuran, Git blob SHA-1, dan SHA-256 yang dipin sebelum parsing. Semua
+59 file yang dibundel juga terdaftar dalam manifest integritas versi 1
+[`data/language-integrity.json`](../data/language-integrity.json), yang mencatat
+ukuran, SHA-256, format, dan encoding. `DatasetIntegrityManifest::bundled()`
+dan `verify_directory("data/language")` memvalidasi file hilang, file ekstra,
+checksum, UTF-8, dan struktur format dasar. CLI Rust dapat menjalankan
+`cargo run --bin dataset-integrity -- verify data/language data/language-integrity.json`.
+Manifest memberi deteksi perubahan terhadap nilai yang dikomit, bukan tanda tangan
+kriptografis; perubahan manifest sendiri tetap memerlukan review.
+Manifest tersebut juga menyimpan ukuran dan SHA-256 dua file Hunspell yang
+dimuat dari luar bundle; loader mengecek Git blob SHA-1 dan SHA-256 keduanya.
 
 PUD dapat diimpor sebagai anotasi CoNLL-U ke lexicon/checkpoint. Loader NusaX
 membaca alignment terjemahan, data sentimen, dan lexicon multibahasa; tokenizer

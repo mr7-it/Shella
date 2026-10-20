@@ -56,14 +56,15 @@ pub use knowledge::{
     ModelApprovalStatus, Prototype, PrototypeCandidateScore, SCORING_VERSION, feature_definitions,
 };
 pub use language::{
-    DatasetId, DatasetLoadReport, DatasetLoader, DatasetProvenance, EncodedText, HunspellAffixKind,
-    HunspellAffixRule, HunspellAnalysis, HunspellRoot, IndoSumArticle, IndoSumCorpus,
-    IndoSumPartition, IndoSumRouge1, IndonesianVocabulary, LanguageNetwork, LexicalAnalysis,
-    LexicalConnection, LexicalRelation, LexicalRelationType, LexiconEntry, LexiconEntryInput,
-    LexiconMetadata, LicenseRegistry, LinguisticMetadata, NusaXLexicon, NusaXLexiconEntry,
-    NusaXParallelCorpus, NusaXParallelSentence, NusaXSentimentCorpus, NusaXSentimentExample,
-    NusaXSentimentLabel, NusaXSentimentMetrics, NusaXSplit, NusaXWordPair, SourceProvenance,
-    StopwordSet, TextEncoder, Vocabulary, normalize_text, tokenize,
+    DatasetEncoding, DatasetFileFormat, DatasetFileIntegrity, DatasetId, DatasetIntegrityManifest,
+    DatasetIntegrityReport, DatasetLoadReport, DatasetLoader, DatasetProvenance, EncodedText,
+    HunspellAffixKind, HunspellAffixRule, HunspellAnalysis, HunspellRoot, IndoSumArticle,
+    IndoSumCorpus, IndoSumPartition, IndoSumRouge1, IndonesianVocabulary, LanguageNetwork,
+    LexicalAnalysis, LexicalConnection, LexicalRelation, LexicalRelationType, LexiconEntry,
+    LexiconEntryInput, LexiconMetadata, LicenseRegistry, LinguisticMetadata, NusaXLexicon,
+    NusaXLexiconEntry, NusaXParallelCorpus, NusaXParallelSentence, NusaXSentimentCorpus,
+    NusaXSentimentExample, NusaXSentimentLabel, NusaXSentimentMetrics, NusaXSplit, NusaXWordPair,
+    SourceProvenance, StopwordSet, TextEncoder, Vocabulary, normalize_text, tokenize,
 };
 pub use learning::{
     ConsolidationReport, ForgettingReport, LearningMemory, MemoryConflict, MemoryFeedbackWrite,

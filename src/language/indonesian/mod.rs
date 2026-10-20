@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 mod datasets;
 mod hunspell;
 mod indosum;
+mod integrity;
 mod licenses;
 mod nusax;
 mod relations;
@@ -14,6 +15,10 @@ mod relations;
 pub use datasets::{DatasetLoadReport, DatasetLoader, StopwordSet};
 pub use hunspell::{HunspellAffixKind, HunspellAffixRule, HunspellAnalysis, HunspellRoot};
 pub use indosum::{IndoSumArticle, IndoSumCorpus, IndoSumPartition, IndoSumRouge1};
+pub use integrity::{
+    DatasetEncoding, DatasetFileFormat, DatasetFileIntegrity, DatasetIntegrityManifest,
+    DatasetIntegrityReport,
+};
 pub use licenses::{DatasetId, DatasetProvenance, LicenseRegistry};
 pub use nusax::{
     NusaXLexicon, NusaXLexiconEntry, NusaXParallelCorpus, NusaXParallelSentence,

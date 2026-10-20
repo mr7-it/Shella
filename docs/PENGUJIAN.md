@@ -14,6 +14,7 @@ cargo run --release --locked
 cargo run --release --example milestone10_long_term --locked
 cargo bench --bench learning --locked
 cargo bench --bench system --locked
+cargo bench --bench language --locked
 ```
 
 MSRV di manifest adalah Rust 1.85. Jalankan gerbang di stable dan MSRV jika perubahan menyentuh code/dependency. `cargo test --all-targets` membangun/menjalankan target benchmark dengan konfigurasi test; perintah `cargo bench` terpisah dipakai untuk angka performa Release. Jangan menyamakan hasil tes kebenaran dengan timing benchmark.
@@ -66,6 +67,15 @@ dapat diverifikasi. Lihat [inventaris sumber dan lisensi](./DATASET_BAHASA_INDON
 `examples/milestone6_continual.rs` menjalankan 5 seed × 32 epoch per fase untuk 4 asosiasi yang berbagi cue; ini benchmark akurasi/retensi, bukan timing. Runner menulis hasil per seed ke `results/milestone6_continual_2026-10-19.csv`.
 
 `benches/system.rs` mengukur median lima batch untuk network 16/64/256 neuron dengan ring synapses dan delayed event, checkpoint save/restore 64 neuron, prefix/tag retrieval store berisi 256 record, serta reasoning 3 langkah pada jaringan 16 neuron dengan 16 pengalaman. Tidak ada warm-up terpisah pada benchmark system. Hasil bukan peak memory, beban multi-proses, atau jaminan performa deployment.
+
+`benches/language.rs` memuat dan mem-parse NusaX-MT train yang dipin (500
+kalimat), membangun vocabulary aktual berisi 2.795 token, lalu mengukur lookup,
+encoding, serta membandingkan algoritme reverse lookup linear lama dengan indeks
+`WordID` hashbrown. Pada satu run Linux Release, median decoder adalah 1.391,3
+ns/ID untuk linear dan 9,6 ns/ID untuk indeks (sekitar 145× lebih cepat pada
+sampel tersebut); direct lookup hashbrown 27,5 ns/op, `Vocabulary::encode`
+7.900,3 ns/teks, dan `encode_word_ids` 5.333,4 ns/teks. Angka ini pengukuran
+lokal berukuran terbatas dan bukan jaminan performa lintas mesin/aplikasi.
 
 `examples/capacity_probe.rs` dan `scripts/run_capacity_probe.sh` menjalankan workload terpisah untuk RSS/peak RSS Linux, build, median step, checkpoint save dan byte size sampai 16,384 neuron/65,536 sinaps. Hasil aktual Sandbox disimpan pada `results/capacity_sandbox_2026-10-19.csv` dan raw NDJSON; hasil tersebut bukan pengukuran perangkat pengguna.
 
