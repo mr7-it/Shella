@@ -6,7 +6,9 @@ mod schema;
 
 pub use crate::ReasoningCheckpoint;
 pub(crate) use integrity::atomic_write;
-pub use schema::{RestoredKnowledgeState, RestoredState};
+pub use schema::{
+    CheckpointFingerprints, RestoredIntegratedState, RestoredKnowledgeState, RestoredState,
+};
 
 /// Operasi simpan/pulihkan checkpoint versi 1.
 pub struct Checkpoint;

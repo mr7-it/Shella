@@ -1,8 +1,38 @@
-use super::{Checkpoint, RestoredKnowledgeState, RestoredState, integrity, schema::Payload};
+use super::{
+    Checkpoint, RestoredIntegratedState, RestoredKnowledgeState, RestoredState, integrity,
+    schema::Payload,
+};
 use crate::{LifRuntime, SimError};
 use std::path::Path;
 
 impl Checkpoint {
+    /// Memulihkan neural state dan fingerprint store yang perlu dipadankan pemanggil.
+    pub fn restore_integrated_engine(
+        path: impl AsRef<Path>,
+    ) -> Result<RestoredIntegratedState, SimError> {
+        let payload = integrity::read_payload(path.as_ref())?;
+        let Payload::IntegratedEngine {
+            mut network,
+            evaluator,
+            fingerprints,
+        } = payload
+        else {
+            return Err(integrity::invalid_checkpoint(
+                "checkpoint tidak berisi integrated Engine state",
+            ));
+        };
+        fingerprints.validate()?;
+        network.migrate_restored_identity_state()?;
+        if let Some(evaluator) = &evaluator {
+            evaluator.validate_restored_state()?;
+        }
+        Ok(RestoredIntegratedState {
+            network,
+            evaluator,
+            fingerprints,
+        })
+    }
+
     /// Memulihkan lexicon Indonesia setelah validasi format dan invariants.
     pub fn restore_indonesian_vocabulary(
         path: impl AsRef<Path>,

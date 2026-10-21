@@ -24,7 +24,10 @@ Paket Cargo, crate library, dan binari utama bernama `shella`. `src/lib.rs` meng
   `hunspell`, `nusax`, dan `indosum` memuat parser/policy sumber. Aset
   stopwords-id, PUD, NusaX, dan IndoSum berada terpisah di `data/language/` dan
   diverifikasi dengan hash sebelum digunakan. GSD/CSUI/IndoNLI tidak diaktifkan
-  karena lisensi teks atau cakupan izinnya belum terverifikasi.
+  karena lisensi teks atau cakupan izinnya belum terverifikasi. `semantic.rs`
+  menghubungkan `IndonesianVocabulary` ke representasi frasa, graph berprovenance,
+  parsing role heuristik, resolusi konteks terbatas, retrieval, inference trace,
+  dan adapter resonansi LIF.
 - `sdk/`: input/output, engine, sesi, dan adapter persistence.
 - `engine/`: reasoning engine modular terpisah dari SDK. `inference.rs` mengorkestrasi
   retrieval `LearningMemory` dan langkah LIF; `temporal.rs`, `calibration.rs`,
@@ -49,13 +52,15 @@ Benchmark conditioning memanggil `LifNetwork`, evaluator, dan reward learning pr
 
 `Checkpoint` menyimpan `LifRuntime`, `LifNetwork`, atau `LanguageNetwork` (vocabulary dan ID kata/subword, binding neuron, relasi ID sinaps, bobot, parameter neuron, traces, pending events) serta evaluator opsional. JSON berversi memeriksa ukuran, checksum, dan invariants sebelum pemulihan. Network lama tanpa field identitas dimigrasikan secara deterministik dari urutan populasi/topologi saat restore; ID tersebut disimpan pada save berikutnya.
 
-`MemoryStore` adalah store JSON terpisah dengan upsert, delete, get, ID stabil, prefix/tag retrieval, version/checksum check, dan write-temp/rename. Advisory exclusive lock pada sidecar path mencegah lebih dari satu instance/proses membuka store yang sama untuk menulis; path dinormalisasi sebelum lock diambil. Format menyimpan record JSON; tidak ada embedding atau associative retrieval semantik.
+`MemoryStore` adalah store JSON dengan upsert, delete, get, ID stabil, prefix/tag dan embedding retrieval, version/checksum check, serta write-temp/rename. Advisory exclusive lock pada sidecar path mencegah lebih dari satu instance/proses membuka store yang sama untuk menulis. `SemanticMemory` menyimpan satu snapshot schema-versioned di atas store yang sama untuk mengomit lexicon, graph, phrase, konteks, dan deletion journal secara atomik. Retrieval semantiknya memakai WordID dan relasi eksplisit, bukan embedding `TextEmbedding`; kedua jalur tetap terpisah.
 
 ## Keputusan, bahasa, dan aplikasi
 
 `DecisionPolicy` menghitung skor linear dari fitur yang disediakan aplikasi; `selection` menghasilkan kontribusi terurai, margin, alasan, tie-break, atau abstain. Skor bukan probabilitas dan confidence tidak dikalibrasi.
 
-Pipeline teks menormalisasi Unicode lowercase dan tokenisasi karakter alfanumerik. `Vocabulary` menyimpan `WordID` terpisah dari nilai hash; hashbrown hanya menjadi indeks lookup. `LanguageNetwork` memberi tiap kata urutan `SubwordID`, dapat mengikat kata pada banyak `NeuronID`, membentuk sinaps aktual di antara representasi kata, serta memproyeksikan input ke LIF/STDP. `ReasoningEngine::reason_text` menghubungkan proyeksi teks dengan retrieval memory dan reasoning yang ada. `TextEncoder` lama tetap tersedia dengan proyeksi modulo agar API kompatibel. Tidak ada model bahasa, decoder/generator, pembelajaran semantik, atau metrik generalisasi teks.
+Pipeline teks menormalisasi Unicode lowercase dan tokenisasi karakter alfanumerik. `Vocabulary` menyimpan `WordID` terpisah dari nilai hash; hashbrown hanya menjadi indeks lookup. `LanguageNetwork` memberi tiap kata urutan `SubwordID`, dapat mengikat kata pada banyak `NeuronID`, membentuk sinaps aktual di antara representasi kata, serta memproyeksikan input ke LIF/STDP. `SemanticMemory` menautkan token/frasa ke ID lexicon dan edge dengan provenance; role kalimat, negasi, anafora satu kalimat, retrieval, dan inference dibatasi aturan yang dijelaskan di `docs/BAHASA.md`. `ReasoningEngine::reason_text` memakai semantic currents saat store dipasang; `learn_from_semantic_feedback` mengalirkan analisis, gap, currents, feedback ke `LearningMemory`, dan update readout/STDP pada LIF aktual. Pengalaman neural tetap fitur currents, bukan teks mentah.
+
+Reasoning checkpoint mengikat LearningMemory dan semantic store melalui fingerprint. SDK Engine mempunyai payload integrated checkpoint yang mengikat generic `MemoryStore`, `LearningMemory`, dan `SemanticMemory`; file store tetap terpisah. Deletion journal pada SemanticMemory menghapus experience task terkait dan context frames pada jalur ReasoningEngine, dan checkpoint ditolak bila antrean belum selesai. Perubahan lintas file tidak memiliki transaksi atomic umum; journal membuat penghapusan dapat di-retry. Checkpoint SDK legacy tidak berubah dan tetap tidak menyertakan konfigurasi encoder/policy. `TextEncoder` lama tetap tersedia dengan proyeksi modulo agar API kompatibel. Tidak ada model bahasa, decoder/generator, atau bukti generalisasi luas.
 
 `IndonesianVocabulary` memvalidasi entri JSON dengan schema version, ID kata
 append-only, provenance sumber/lisensi per entri, metadata linguistik opsional,
@@ -66,7 +71,7 @@ Dataset pihak ketiga yang disetujui disimpan terpisah dari kode di
 `data/language/` dan divalidasi melalui registry; dataset lain tidak diaktifkan
 tanpa izin yang jelas. Segmentasi kata tak terdaftar hanya bersifat ortografis.
 
-`Engine`/`Session` mengirim input arus/teks ke network, menerima spike aktual, menghubungkan spike neuron ke kanal aksi, memanggil decision/evaluator, menulis memory, dan menyimpan/memulihkan checkpoint. SDK sinkron dalam proses.
+`Engine`/`Session` mengirim input arus/teks ke network, menerima spike aktual, menghubungkan spike neuron ke kanal aksi, memanggil decision/evaluator, menulis memory, dan menyimpan/memulihkan checkpoint. `with_semantic_memory` memasang facade semantic; `with_learning_memory` memasang neural experience store. `analyze_semantics` membaca lexicon, `analyze_semantics_in_context` menyimpan konteks persisten, dan `resonate_semantics` mengorkestrasi graph semantic dengan `LanguageNetwork` ber-ID cocok. `save_integrated_checkpoint`/`restore_integrated_checkpoint` memeriksa fingerprint seluruh store sebelum mutasi neural state. SDK sinkron dalam proses; store eksternal dibuka terpisah sebelum restore.
 
 `ReasoningEngine` memiliki `LifNetwork` dan `LearningMemory`. Setiap panggilan
 `reason` mengambil pengalaman sesuai context, menggabungkan retrieval score dengan

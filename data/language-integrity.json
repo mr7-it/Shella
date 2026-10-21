@@ -368,6 +368,30 @@
       "sha256": "07efad4d64863ab442aef820afdb34c269f80366c6efb583225f943e5baf88b2",
       "format": "conllu",
       "encoding": "utf8"
+    },
+    "wordnet-bahasa/LICENSE": {
+      "size_bytes": 1628,
+      "sha256": "aae2641722806f77a41bf694c018072b8a49f4aa2e43c4d1015b7072fa7118e7",
+      "format": "text",
+      "encoding": "utf8"
+    },
+    "wordnet-bahasa/README.md": {
+      "size_bytes": 854,
+      "sha256": "efec5e74d2bbb13df19e7407dc4d085b73940a6740d8325b4ce17607aca87516",
+      "format": "text",
+      "encoding": "utf8"
+    },
+    "wordnet-bahasa/wn-ind-def.tab": {
+      "size_bytes": 959117,
+      "sha256": "5b34e879b2908e730721d9a31563c28aea70e7ba5c6dd42c6a003356b822e9e0",
+      "format": "text",
+      "encoding": "utf8"
+    },
+    "wordnet-bahasa/wn-msa-all.tab": {
+      "size_bytes": 17028012,
+      "sha256": "f66698eb836bd3289db2271eb6499587d52f9066f1e7d47d2b653e5f64e0894b",
+      "format": "text",
+      "encoding": "utf8"
     }
   }
 }

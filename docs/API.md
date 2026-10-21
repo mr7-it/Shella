@@ -256,6 +256,54 @@ Semua operasi simulasi/storage/SDK mengembalikan `Result<_, SimError>`. Varian m
 
 API ini sinkron dalam proses. Tidak ada timeout, cancellation, transport, server, RPC, autentikasi, atau concurrency runtime bawaan karena tidak ada operasi jaringan/asinkron yang ditawarkan.
 
+## Analisis semantik dan semantic memory
+
+`SemanticMemory::open(path, IndonesianVocabulary)` memakai `MemoryStore` yang
+sudah ada untuk menyimpan lexicon, graph, phrase, dan konteks dalam satu snapshot
+JSON atomik. Tambahkan entry dengan `learn_entry`; WordID lama dipertahankan.
+`add_phrase(phrase, kind, meaning, evidence)` mewajibkan seluruh token terdaftar.
+`add_relation(ConceptRelation)` mengembalikan `true` bila edge baru berkonflik
+dengan sinonim/antonim yang sudah ada; konflik tetap tersimpan dan terlihat.
+
+`analyze(text)` mengembalikan token ber-WordID, span byte pada teks ternormalisasi,
+phrase match, lemma ambigu, struktur role, dan negasi opsional. `analyze_in_context`
+menyimpan percakapan dan memberi kandidat resolusi pronomina satu kalimat.
+`retrieve(query, context_id, limit)` memberikan skor relevansi serta alasan;
+`infer(word_id, relation_kind)` menghasilkan simpulan dengan path dan ID bukti.
+Semua skor confidence/relevansi adalah input atau skor heuristic, bukan probabilitas
+yang dikalibrasi.
+
+Pasang instance dengan `Engine::with_semantic_memory`. `Session::analyze_semantics`
+dan `analyze_semantics_in_context` mengaksesnya. `Session::resonate_semantics`
+menerima `LanguageNetwork` terpisah yang `WordID`-nya harus cocok dengan lexicon;
+sinonim ber-confidence dan non-hipotesis dapat menambah arus ke binding neuron
+sebelum satu langkah LIF/STDP. Ini tidak otomatis menyambungkan semantic store ke
+`LearningMemory` pada `Engine` SDK. Untuk jalur pembelajaran terintegrasi, pasang
+`SemanticMemory` pada `ReasoningEngine::with_semantic_memory`, lalu gunakan
+`learn_from_semantic_feedback(context_id, text, language_network, current_per_word,
+expected_action, predicted_action, action_neurons, learning_rate)`. Jalur ini
+menyimpan konteks, mengembalikan gap, memakai semantic currents, merekam pengalaman
+di `LearningMemory`, dan mengupdate jaringan aktual dengan aturan readout/STDP yang
+sudah ada. Pengalaman tetap berupa fitur neural, tidak menyimpan teks mentah.
+
+`ReasoningEngine::remove_semantic_concept` menyinkronkan deletion journal semantic
+ke `LearningMemory::discard_task` dan menghapus context frame terkait. Jurnal
+disimpan persisten serta diproses ulang setelah kegagalan. Checkpoint reasoning
+menyimpan fingerprint semantic opsional; restore lama tanpa fingerprint tetap
+berlaku untuk checkpoint versi sebelumnya. `Engine` SDK menyediakan
+`with_learning_memory`, `save_integrated_checkpoint`, dan
+`restore_integrated_checkpoint`; restore membandingkan fingerprint tiga store
+sebelum memodifikasi LIF network. Snapshot terintegrasi tetap mengacu pada file
+store eksternal, bukan menggandakan kontennya, sehingga path dan file store harus
+dipulihkan lebih dahulu. Cross-file update bukan transaksi atomik umum.
+
+`evaluate_splits(training, validation, test)` menolak ID contoh atau teks
+ternormalisasi berulang antar split, lalu melaporkan exact-frame accuracy, slot
+accuracy, dan token coverage. Fungsi ini tidak melatih atau memilih model; pemanggil
+tetap bertanggung jawab atas pemisahan sumber data sebelum belajar. Lihat
+[batas parser, sumber, dan interpretasi metrik](BAHASA.md#semantic-memory-dan-analisis-berbukti).
+`evaluate_grouped_splits` juga menolak `group_id` sumber/semantik lintas split.
+
 ## API benchmark M11
 
 `IrisSample` merepresentasikan satu baris data tanpa mengubah nilai asli. `stratified_split` membentuk train/validation/test per kelas, sedangkan `stratified_folds` membentuk k-fold hanya pada indeks non-test. `TrainScaler` fit pada indeks train dan `transform` menerapkan parameter tersebut ke validation/test. `evaluate_predictions` menghasilkan `SelfEvaluation` yang memuat `DecisionMetrics`, jumlah sampel lemah, dan jumlah sampel uncertainty.

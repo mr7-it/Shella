@@ -43,7 +43,13 @@ impl ReasoningEngine {
                 reason: "identitas/populasi neuron tidak cocok dengan reasoning engine",
             });
         }
-        let currents = language_network.encode_currents(text, current_per_word_na)?;
+        let currents = if let Some(semantic_memory) = &self.semantic_memory {
+            semantic_memory
+                .encode_currents(language_network, text, current_per_word_na)?
+                .currents_na
+        } else {
+            language_network.encode_currents(text, current_per_word_na)?
+        };
         self.reason(context_id, &currents, action_neurons)
     }
 
@@ -77,6 +83,7 @@ impl ReasoningEngine {
         retrieval_query: &[f64],
         action_neurons: &[usize],
     ) -> Result<ReasoningResult, SimError> {
+        self.synchronize_persistent_memories()?;
         validate_reasoning_input(&self.network, input_currents_na, action_neurons)?;
         let recalled = self.memory.recall_task_similar(
             context_id,

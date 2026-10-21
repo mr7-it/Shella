@@ -129,6 +129,8 @@ pub struct ReasoningCheckpoint {
     pub(crate) context_frames: Vec<ContextFrame>,
     pub(crate) calibration: Option<CalibrationState>,
     pub(crate) memory_fingerprint: String,
+    #[serde(default)]
+    pub(crate) semantic_memory_fingerprint: Option<String>,
 }
 
 impl ReasoningCheckpoint {
@@ -152,6 +154,13 @@ impl ReasoningCheckpoint {
                 .memory_fingerprint
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit())
+            || self
+                .semantic_memory_fingerprint
+                .as_ref()
+                .is_some_and(|fingerprint| {
+                    fingerprint.len() != 64
+                        || !fingerprint.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
         {
             return Err(SimError::InvalidCheckpoint {
                 reason: "konfigurasi reasoning checkpoint invalid".to_owned(),

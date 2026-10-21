@@ -1,3 +1,4 @@
+use crate::language::{SemanticAnalysis, SemanticGapReport};
 use crate::reasoning::{EvidenceContradiction, UncertaintyDecomposition};
 use crate::{MemoryFeedbackWrite, MemoryRecall, NetworkStep, SimError};
 use serde::{Deserialize, Serialize};
@@ -273,5 +274,41 @@ impl LearningOutcome {
     #[must_use]
     pub const fn updated_synapses(&self) -> usize {
         self.updated_synapses
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SemanticLearningOutcome {
+    analysis: SemanticAnalysis,
+    gaps: SemanticGapReport,
+    learning: Option<LearningOutcome>,
+}
+
+impl SemanticLearningOutcome {
+    #[must_use]
+    pub const fn analysis(&self) -> &SemanticAnalysis {
+        &self.analysis
+    }
+
+    #[must_use]
+    pub const fn gaps(&self) -> &SemanticGapReport {
+        &self.gaps
+    }
+
+    #[must_use]
+    pub const fn learning(&self) -> Option<&LearningOutcome> {
+        self.learning.as_ref()
+    }
+
+    pub(super) const fn new(
+        analysis: SemanticAnalysis,
+        gaps: SemanticGapReport,
+        learning: Option<LearningOutcome>,
+    ) -> Self {
+        Self {
+            analysis,
+            gaps,
+            learning,
+        }
     }
 }

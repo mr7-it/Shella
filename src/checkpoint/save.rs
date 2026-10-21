@@ -3,6 +3,31 @@ use crate::{ClassKnowledgeModel, LifNetwork, LifRuntime, RewardEvaluator, SimErr
 use std::path::Path;
 
 impl Checkpoint {
+    /// Menyimpan neural state dengan identitas store eksternal yang harus cocok saat restore.
+    pub fn save_integrated_engine(
+        path: impl AsRef<Path>,
+        network: &LifNetwork,
+        evaluator: Option<&RewardEvaluator>,
+        fingerprints: &super::schema::CheckpointFingerprints,
+    ) -> Result<(), SimError> {
+        fingerprints.validate()?;
+        let mut network = network.clone();
+        network.migrate_restored_identity_state()?;
+        if let Some(evaluator) = evaluator {
+            evaluator.validate_restored_state()?;
+        }
+        let payload_json = serde_json::to_string(&Payload::IntegratedEngine {
+            network,
+            evaluator: evaluator.cloned(),
+            fingerprints: fingerprints.clone(),
+        })
+        .map_err(|error| SimError::SerializationFailed {
+            subsystem: "integrated engine checkpoint",
+            reason: error.to_string(),
+        })?;
+        integrity::write_payload(path.as_ref(), payload_json)
+    }
+
     /// Menyimpan lexicon Indonesia tervalidasi melalui envelope checksummed atomik.
     pub fn save_indonesian_vocabulary(
         path: impl AsRef<Path>,

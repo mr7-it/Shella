@@ -45,6 +45,26 @@ cargo bench --bench system --locked
 
 Hasil merupakan output yang diukur dari kode aktual. Ulangi perintah pada target hardware/beban kerja yang relevan untuk evaluasi lokal.
 
+## Semantic feedback group holdout
+
+Tes `benchmark_polaritas_100_test_group_held_out_membandingkan_baseline_dan_feedback`
+memisahkan 50 train, 50 validation, dan 100 test menurut pasangan semantik
+subjek-objek. Test nouns tidak ada dalam vocabulary yang dibangun dari train.
+Sebelum tiap label train diberikan, jaringan membuat prediksi aktual, lalu
+feedback target diterapkan secara incremental pada LIF/readout dan pengalaman
+disimpan ke `LearningMemory`. Validation tidak memberi feedback. Baseline dan
+hasil setelah 50 feedback diukur pada 100 kalimat test yang identik;
+tiap inferensi memakai clone neural state dan snapshot LearningMemory yang segar
+agar penghitung usage tidak mengubah prediksi berikutnya. Pengukuran aktual pada
+sesi ini: baseline **0/100**, validation pascabelajar **50/50**, dan test
+pascabelajar **100/100**.
+
+Ini benchmark sintetik, bukan korpus berlisensi: labelnya adalah negasi eksplisit
+(`tidak`), struktur template tetap, dan pasangan noun test baru. Hasilnya
+mengisolasi transfer fitur polaritas pada task sempit; tidak mengukur variasi
+sintaksis luas, paraphrase alami, atau generalisasi bahasa secara umum. Data test
+tidak dipakai untuk pembelajaran atau penyesuaian parameter.
+
 
 ## Continual learning Milestone 6
 

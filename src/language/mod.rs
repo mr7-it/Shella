@@ -3,6 +3,7 @@ mod encoder;
 mod indonesian;
 mod network;
 mod normalization;
+mod semantic;
 mod tokenizer;
 mod vocabulary;
 
@@ -16,8 +17,16 @@ pub use indonesian::{
     LinguisticMetadata, NusaXLexicon, NusaXLexiconEntry, NusaXParallelCorpus,
     NusaXParallelSentence, NusaXSentimentCorpus, NusaXSentimentExample, NusaXSentimentLabel,
     NusaXSentimentMetrics, NusaXSplit, NusaXWordPair, SourceProvenance, StopwordSet,
+    WordNetBahasaDataset, WordNetBahasaDefinition, WordNetBahasaMember,
 };
 pub use network::{LanguageNetwork, LexicalConnection};
 pub use normalization::normalize_text;
+pub use semantic::{
+    AssertionStatus, ConceptRelation, ContextResolution, EvidenceLevel, GroupedSemanticExample,
+    InferenceTrace, PhraseEntry, PhraseKind, PhraseMatch, SemanticAnalysis, SemanticEncoding,
+    SemanticEvaluationReport, SemanticEvidence, SemanticExample, SemanticGapReport, SemanticMemory,
+    SemanticRecall, SemanticRelationKind, SemanticResonance, SemanticRole, SemanticRoleKind,
+    SemanticSplitMetrics, SemanticToken, SentenceStructure, TokenAmbiguity, TokenSpan,
+};
 pub use tokenizer::tokenize;
 pub use vocabulary::Vocabulary;

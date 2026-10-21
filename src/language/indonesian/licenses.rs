@@ -12,6 +12,7 @@ const STOPWORDS_REVISION: &str = "6109494eb4cfebd75c59bd832848374d02f4e907";
 const HUNSPELL_REVISION: &str = "65e552e7216cecab2b497c898a9a7ee1e2e2de11";
 const PUD_REVISION: &str = "1d8741838d6b8fa64dbda85a33c4af0700fb7430";
 const NUSAX_REVISION: &str = "75b0be5d982348332509f296e10d9bf9cb66d60f";
+const WORDNET_BAHASA_REVISION: &str = "fb201ec6155dc5c3a23d76673cfbb28630bc9a67";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -309,6 +310,25 @@ impl LicenseRegistry {
                     file_git_blob_sha1: nusax_file_hashes(),
                 },
                 DatasetProvenance {
+                    id: DatasetId::WordNetBahasa,
+                    repository_url: "https://github.com/open-language/wordnets".to_owned(),
+                    revision: WORDNET_BAHASA_REVISION.to_owned(),
+                    license_id: "MIT".to_owned(),
+                    license_url: "https://sourceforge.net/p/wn-msa/tab/HEAD/tree/trunk/LICENSE?format=raw".to_owned(),
+                    attribution: "Wordnet Bahasa contributors: Francis Bond, David Moeljadi, Hannah Choi, Nurril Hirfana Mohamed Noor, Suerya Sapuan, Muhammad Zulhelmy Mohamed Rosman, Hammam Riza, and Tan Enya Kong".to_owned(),
+                    data_scope: "r24 Indonesian I/Y memberships and Indonesian definitions; lower-quality and other-language entries are excluded".to_owned(),
+                    file_git_blob_sha1: BTreeMap::from([
+                        (
+                            "data/msa-wordnet-r24/wn-msa-all.tab".to_owned(),
+                            "58467f5edaf355bc1cdcbdcf05d1b22d206eddd1".to_owned(),
+                        ),
+                        (
+                            "data/msa-wordnet-r24/wn-ind-def.tab".to_owned(),
+                            "57d213efb21839690ebc2c293577e0e0a81d4e5c".to_owned(),
+                        ),
+                    ]),
+                },
+                DatasetProvenance {
                     id: DatasetId::IndoSum,
                     repository_url: "https://drive.google.com/file/d/1OgYbPfXFAv3TbwP1Qcwt_CC9cVWSJaco/view"
                         .to_owned(),
@@ -401,12 +421,13 @@ impl LicenseRegistry {
             .contains(&file_path),
             DatasetId::UdIndonesianPud => file_path == "id_pud-ud-test.conllu",
             DatasetId::StopwordsIsoId => file_path == "stopwords-id.json",
+            DatasetId::WordNetBahasa => dataset.file_git_blob_sha1.contains_key(file_path),
             DatasetId::HunspellDictionaries => {
                 matches!(file_path, "Indonesia.dic" | "Indonesia.aff")
             }
             DatasetId::NusaX => dataset.file_git_blob_sha1.contains_key(file_path),
             DatasetId::IndoSum => matches!(file_path, "indosum.tar.gz" | "README.txt"),
-            DatasetId::WordNetBahasa | DatasetId::IndoNli => false,
+            DatasetId::IndoNli => false,
         };
         if !valid_file || file_path.contains("..") || line_number == 0 {
             return Err(SimError::InvalidInput {

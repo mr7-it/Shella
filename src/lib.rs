@@ -35,7 +35,10 @@ pub use benchmark::{
     LongTermLearningRunResult, LongTermLearningTaskMetrics, SelfEvaluation, StratifiedFold,
     StratifiedSplit, TrainScaler, evaluate_predictions, noise, stratified_folds, stratified_split,
 };
-pub use checkpoint::{Checkpoint, RestoredKnowledgeState, RestoredState};
+pub use checkpoint::{
+    Checkpoint, CheckpointFingerprints, RestoredIntegratedState, RestoredKnowledgeState,
+    RestoredState,
+};
 pub use config::LifConfig;
 pub use decision::{
     AbstentionReason, CalibrationEvaluator, CalibrationMetrics, Candidate, Decision,
@@ -44,7 +47,7 @@ pub use decision::{
 };
 pub use engine::{
     LearningOutcome, MemoryAttention, ReasoningConfig, ReasoningEngine, ReasoningResult,
-    ReasoningStep,
+    ReasoningStep, SemanticLearningOutcome,
 };
 pub use error::SimError;
 pub use evaluator::{RewardEvaluation, RewardEvaluator, RewardEvaluatorConfig, RewardMetrics};
@@ -56,15 +59,21 @@ pub use knowledge::{
     ModelApprovalStatus, Prototype, PrototypeCandidateScore, SCORING_VERSION, feature_definitions,
 };
 pub use language::{
-    DatasetEncoding, DatasetFileFormat, DatasetFileIntegrity, DatasetId, DatasetIntegrityManifest,
-    DatasetIntegrityReport, DatasetLoadReport, DatasetLoader, DatasetProvenance, EncodedText,
-    HunspellAffixKind, HunspellAffixRule, HunspellAnalysis, HunspellRoot, IndoSumArticle,
-    IndoSumCorpus, IndoSumPartition, IndoSumRouge1, IndonesianVocabulary, LanguageNetwork,
-    LexicalAnalysis, LexicalConnection, LexicalRelation, LexicalRelationType, LexiconEntry,
-    LexiconEntryInput, LexiconMetadata, LicenseRegistry, LinguisticMetadata, NusaXLexicon,
-    NusaXLexiconEntry, NusaXParallelCorpus, NusaXParallelSentence, NusaXSentimentCorpus,
-    NusaXSentimentExample, NusaXSentimentLabel, NusaXSentimentMetrics, NusaXSplit, NusaXWordPair,
-    SourceProvenance, StopwordSet, TextEncoder, Vocabulary, normalize_text, tokenize,
+    AssertionStatus, ConceptRelation, ContextResolution, DatasetEncoding, DatasetFileFormat,
+    DatasetFileIntegrity, DatasetId, DatasetIntegrityManifest, DatasetIntegrityReport,
+    DatasetLoadReport, DatasetLoader, DatasetProvenance, EncodedText, EvidenceLevel,
+    GroupedSemanticExample, HunspellAffixKind, HunspellAffixRule, HunspellAnalysis, HunspellRoot,
+    IndoSumArticle, IndoSumCorpus, IndoSumPartition, IndoSumRouge1, IndonesianVocabulary,
+    InferenceTrace, LanguageNetwork, LexicalAnalysis, LexicalConnection, LexicalRelation,
+    LexicalRelationType, LexiconEntry, LexiconEntryInput, LexiconMetadata, LicenseRegistry,
+    LinguisticMetadata, NusaXLexicon, NusaXLexiconEntry, NusaXParallelCorpus,
+    NusaXParallelSentence, NusaXSentimentCorpus, NusaXSentimentExample, NusaXSentimentLabel,
+    NusaXSentimentMetrics, NusaXSplit, NusaXWordPair, PhraseEntry, PhraseKind, PhraseMatch,
+    SemanticAnalysis, SemanticEncoding, SemanticEvaluationReport, SemanticEvidence,
+    SemanticExample, SemanticGapReport, SemanticMemory, SemanticRecall, SemanticRelationKind,
+    SemanticResonance, SemanticRole, SemanticRoleKind, SemanticSplitMetrics, SemanticToken,
+    SentenceStructure, SourceProvenance, StopwordSet, TextEncoder, TokenAmbiguity, TokenSpan,
+    Vocabulary, normalize_text, tokenize,
 };
 pub use learning::{
     ConsolidationReport, ForgettingReport, LearningMemory, MemoryConflict, MemoryFeedbackWrite,

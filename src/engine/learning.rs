@@ -1,8 +1,64 @@
-use super::ReasoningEngine;
 use super::validation::{validate_action_label, validate_readout_update, validate_reasoning_input};
-use crate::{LearningOutcome, LifNetwork, SimError};
+use super::{ReasoningEngine, SemanticLearningOutcome};
+use crate::{LanguageNetwork, LearningOutcome, LifNetwork, SimError};
 
 impl ReasoningEngine {
+    /// Mengubah teks melalui semantic graph, menyimpan konteks/pengalaman, dan memperbarui LIF.
+    #[allow(clippy::too_many_arguments)]
+    pub fn learn_from_semantic_feedback(
+        &mut self,
+        context_id: &str,
+        text: &str,
+        language_network: &LanguageNetwork,
+        current_per_word_na: f64,
+        expected_action: Option<usize>,
+        predicted_action: Option<usize>,
+        action_neurons: &[usize],
+        learning_rate: f64,
+    ) -> Result<SemanticLearningOutcome, SimError> {
+        self.synchronize_persistent_memories()?;
+        if self.network.neuron_count() != language_network.network().neuron_count()
+            || (0..self.network.neuron_count()).any(|index| {
+                self.network.neuron_id(index) != language_network.network().neuron_id(index)
+            })
+        {
+            return Err(SimError::InvalidInput {
+                parameter: "language_network",
+                reason: "identitas/populasi neuron tidak cocok dengan reasoning engine",
+            });
+        }
+        let (analysis, gaps, currents) = {
+            let semantic_memory = self
+                .semantic_memory
+                .as_mut()
+                .ok_or(SimError::InvalidInput {
+                    parameter: "semantic_memory",
+                    reason: "ReasoningEngine belum memasang SemanticMemory",
+                })?;
+            let analysis = semantic_memory.analyze_in_context(context_id, text)?;
+            let gaps = semantic_memory.detect_gaps(text)?;
+            if !gaps.unknown_tokens.is_empty()
+                || !gaps.ambiguous_tokens.is_empty()
+                || !gaps.conflicting_tokens.is_empty()
+            {
+                return Ok(SemanticLearningOutcome::new(analysis, gaps, None));
+            }
+            let currents = semantic_memory
+                .encode_currents(language_network, text, current_per_word_na)?
+                .currents_na;
+            (analysis, gaps, currents)
+        };
+        let learning = self.learn_from_feedback(
+            context_id,
+            &currents,
+            expected_action,
+            predicted_action,
+            action_neurons,
+            learning_rate,
+        )?;
+        Ok(SemanticLearningOutcome::new(analysis, gaps, Some(learning)))
+    }
+
     /// Menyimpan feedback pengalaman dan memperbarui sinaps readout yang sesuai.
     pub fn learn_from_feedback(
         &mut self,
@@ -13,6 +69,7 @@ impl ReasoningEngine {
         action_neurons: &[usize],
         learning_rate: f64,
     ) -> Result<LearningOutcome, SimError> {
+        self.synchronize_persistent_memories()?;
         validate_reasoning_input(&self.network, features, action_neurons)?;
         validate_action_label(expected_action, action_neurons.len(), "expected_action")?;
         validate_action_label(predicted_action, action_neurons.len(), "predicted_action")?;

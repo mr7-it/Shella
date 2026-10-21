@@ -338,6 +338,15 @@ fn bundled_asset_path(source: DatasetId, source_path: &str) -> Option<String> {
             "README.txt" => Some("indosum/README.txt".to_owned()),
             _ => None,
         },
+        DatasetId::WordNetBahasa => match source_path {
+            "data/msa-wordnet-r24/wn-msa-all.tab" => {
+                Some("wordnet-bahasa/wn-msa-all.tab".to_owned())
+            }
+            "data/msa-wordnet-r24/wn-ind-def.tab" => {
+                Some("wordnet-bahasa/wn-ind-def.tab".to_owned())
+            }
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -566,6 +575,7 @@ fn classify_format(path: &Path) -> Result<DatasetFileFormat, SimError> {
         Some("csv") => Ok(DatasetFileFormat::Csv),
         Some("json") => Ok(DatasetFileFormat::Json),
         Some("conllu") => Ok(DatasetFileFormat::Conllu),
+        Some("tab") => Ok(DatasetFileFormat::Text),
         Some("gz") => Ok(DatasetFileFormat::TarGzip),
         Some("txt" | "md" | "dic" | "aff" | "LICENSE") | None => Ok(DatasetFileFormat::Text),
         _ if path.file_name().is_some_and(|name| name == "LICENSE") => Ok(DatasetFileFormat::Text),

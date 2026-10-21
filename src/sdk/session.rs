@@ -3,7 +3,7 @@ use crate::{
     SimError,
     decision::{Candidate, Decision},
     evaluator::{RewardEvaluation, RewardEvaluator},
-    language::EncodedText,
+    language::{EncodedText, LanguageNetwork, SemanticAnalysis, SemanticResonance},
 };
 use serde_json::Value;
 use std::path::Path;
@@ -99,6 +99,106 @@ impl Session<'_> {
             .put(key, value, tags)
     }
 
+    /// Akses pengalaman persistent untuk pembelajaran terkontrol di aplikasi.
+    pub fn learning_memory_mut(&mut self) -> Result<&mut crate::LearningMemory, SimError> {
+        self.engine
+            .learning_memory
+            .as_mut()
+            .ok_or(SimError::InvalidInput {
+                parameter: "learning_memory",
+                reason: "engine belum memasang LearningMemory",
+            })
+    }
+
+    /// Menganalisis teks melalui semantic memory yang dipasang pada engine.
+    pub fn analyze_semantics(&self, text: &str) -> Result<SemanticAnalysis, SimError> {
+        self.engine
+            .semantic_memory
+            .as_ref()
+            .ok_or(SimError::InvalidInput {
+                parameter: "semantic_memory",
+                reason: "engine belum memasang SemanticMemory",
+            })?
+            .analyze(text)
+    }
+
+    /// Menganalisis dan menyimpan kalimat pada konteks percakapan persisten.
+    pub fn analyze_semantics_in_context(
+        &mut self,
+        context_id: &str,
+        text: &str,
+    ) -> Result<SemanticAnalysis, SimError> {
+        self.engine.synchronize_persistent_memories()?;
+        self.engine
+            .semantic_memory
+            .as_mut()
+            .ok_or(SimError::InvalidInput {
+                parameter: "semantic_memory",
+                reason: "engine belum memasang SemanticMemory",
+            })?
+            .analyze_in_context(context_id, text)
+    }
+
+    /// Menjalankan relasi semantik sebagai arus pada LanguageNetwork LIF.
+    pub fn resonate_semantics(
+        &mut self,
+        network: &mut LanguageNetwork,
+        text: &str,
+        current_per_word_na: f64,
+    ) -> Result<SemanticResonance, SimError> {
+        self.engine.synchronize_persistent_memories()?;
+        self.engine
+            .semantic_memory
+            .as_ref()
+            .ok_or(SimError::InvalidInput {
+                parameter: "semantic_memory",
+                reason: "engine belum memasang SemanticMemory",
+            })?
+            .resonate(network, text, current_per_word_na)
+    }
+
+    pub fn remove_semantic_concept(&mut self, word_id: crate::WordID) -> Result<bool, SimError> {
+        if self.engine.semantic_memory.is_none() || self.engine.learning_memory.is_none() {
+            return Err(SimError::InvalidInput {
+                parameter: "integrated_memory",
+                reason: "penghapusan konsep membutuhkan SemanticMemory dan LearningMemory",
+            });
+        }
+        self.engine.synchronize_persistent_memories()?;
+        let removed = self
+            .engine
+            .semantic_memory
+            .as_mut()
+            .ok_or(SimError::InvalidInput {
+                parameter: "semantic_memory",
+                reason: "semantic memory tidak tersedia",
+            })?
+            .remove_concept(word_id)?;
+        self.engine.synchronize_persistent_memories()?;
+        Ok(removed)
+    }
+
+    pub fn forget_semantic_context(&mut self, context_id: &str) -> Result<bool, SimError> {
+        if self.engine.semantic_memory.is_none() || self.engine.learning_memory.is_none() {
+            return Err(SimError::InvalidInput {
+                parameter: "integrated_memory",
+                reason: "penghapusan konteks membutuhkan SemanticMemory dan LearningMemory",
+            });
+        }
+        self.engine.synchronize_persistent_memories()?;
+        let removed = self
+            .engine
+            .semantic_memory
+            .as_mut()
+            .ok_or(SimError::InvalidInput {
+                parameter: "semantic_memory",
+                reason: "semantic memory tidak tersedia",
+            })?
+            .forget_context(context_id)?;
+        self.engine.synchronize_persistent_memories()?;
+        Ok(removed)
+    }
+
     /// Menyimpan snapshot penuh jaringan dan metrik evaluator.
     pub fn save_checkpoint(
         &self,
@@ -106,6 +206,15 @@ impl Session<'_> {
         evaluator: Option<&RewardEvaluator>,
     ) -> Result<(), SimError> {
         self.engine.save_checkpoint(path, evaluator)
+    }
+
+    /// Menyimpan neural checkpoint yang diikat ke fingerprint store terpasang.
+    pub fn save_integrated_checkpoint(
+        &self,
+        path: impl AsRef<Path>,
+        evaluator: Option<&RewardEvaluator>,
+    ) -> Result<(), SimError> {
+        self.engine.save_integrated_checkpoint(path, evaluator)
     }
 
     /// Mengganti state jaringan dari checkpoint setelah validasi penuh; evaluator dikembalikan.
@@ -116,6 +225,21 @@ impl Session<'_> {
         let (network, evaluator) = super::persistence::restore(path)?;
         self.engine.network = network;
         Ok(evaluator)
+    }
+
+    /// Memulihkan hanya jika seluruh store eksternal cocok dengan snapshot.
+    pub fn restore_integrated_checkpoint(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<Option<RewardEvaluator>, SimError> {
+        let restored = crate::Checkpoint::restore_integrated_engine(path)?;
+        if self.engine.checkpoint_fingerprints()? != restored.fingerprints {
+            return Err(SimError::InvalidCheckpoint {
+                reason: "store Engine berubah sejak integrated checkpoint disimpan".to_owned(),
+            });
+        }
+        self.engine.network = restored.network;
+        Ok(restored.evaluator)
     }
 
     fn action_observations(

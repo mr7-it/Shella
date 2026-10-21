@@ -11,10 +11,11 @@ mod validation;
 
 pub use types::{
     LearningOutcome, MemoryAttention, ReasoningConfig, ReasoningResult, ReasoningStep,
+    SemanticLearningOutcome,
 };
 
 use crate::reasoning::{CalibrationState, ContextFrame};
-use crate::{LearningMemory, LifNetwork};
+use crate::{LearningMemory, LifNetwork, SemanticMemory};
 use std::collections::VecDeque;
 
 /// Engine penalaran yang memiliki jaringan LIF dan memori pembelajaran persisten.
@@ -22,6 +23,7 @@ use std::collections::VecDeque;
 pub struct ReasoningEngine {
     network: LifNetwork,
     memory: LearningMemory,
+    semantic_memory: Option<SemanticMemory>,
     config: ReasoningConfig,
     calibration: Option<CalibrationState>,
     context_frames: VecDeque<ContextFrame>,
@@ -34,6 +36,7 @@ impl ReasoningEngine {
         Self {
             network,
             memory,
+            semantic_memory: None,
             config,
             calibration: None,
             context_frames: VecDeque::new(),
@@ -49,6 +52,21 @@ impl ReasoningEngine {
     #[must_use]
     pub const fn memory(&self) -> &LearningMemory {
         &self.memory
+    }
+
+    #[must_use]
+    pub fn with_semantic_memory(mut self, memory: SemanticMemory) -> Self {
+        self.semantic_memory = Some(memory);
+        self
+    }
+
+    #[must_use]
+    pub const fn semantic_memory(&self) -> Option<&SemanticMemory> {
+        self.semantic_memory.as_ref()
+    }
+
+    pub fn semantic_memory_mut(&mut self) -> Option<&mut SemanticMemory> {
+        self.semantic_memory.as_mut()
     }
 
     #[must_use]

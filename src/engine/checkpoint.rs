@@ -15,10 +15,28 @@ impl ReasoningEngine {
         path: impl AsRef<Path>,
         memory: LearningMemory,
     ) -> Result<Self, SimError> {
+        Self::restore_checkpoint_with_semantic_memory(path, memory, None)
+    }
+
+    /// Memulihkan engine beserta semantic memory yang fingerprint-nya dikunci ke snapshot.
+    pub fn restore_checkpoint_with_semantic_memory(
+        path: impl AsRef<Path>,
+        memory: LearningMemory,
+        semantic_memory: Option<crate::SemanticMemory>,
+    ) -> Result<Self, SimError> {
         let checkpoint = Checkpoint::restore_reasoning(path)?;
         if memory.checkpoint_fingerprint()? != checkpoint.memory_fingerprint {
             return Err(SimError::InvalidCheckpoint {
                 reason: "LearningMemory tidak cocok dengan snapshot reasoning".to_owned(),
+            });
+        }
+        let semantic_fingerprint = semantic_memory
+            .as_ref()
+            .map(crate::SemanticMemory::checkpoint_fingerprint)
+            .transpose()?;
+        if semantic_fingerprint != checkpoint.semantic_memory_fingerprint {
+            return Err(SimError::InvalidCheckpoint {
+                reason: "SemanticMemory tidak cocok dengan snapshot reasoning".to_owned(),
             });
         }
         let config = ReasoningConfig {
@@ -31,13 +49,25 @@ impl ReasoningEngine {
             adaptive_compute: checkpoint.adaptive_compute,
         };
         let mut engine = Self::new(checkpoint.network, memory, config);
+        engine.semantic_memory = semantic_memory;
         engine.context_frames = checkpoint.context_frames.into();
         engine.active_context_id = checkpoint.active_context_id;
         engine.calibration = checkpoint.calibration;
+        engine.synchronize_persistent_memories()?;
         Ok(engine)
     }
 
     fn checkpoint_state(&self) -> Result<ReasoningCheckpoint, SimError> {
+        if self
+            .semantic_memory
+            .as_ref()
+            .is_some_and(|memory| !memory.pending_learning_task_deletions().is_empty())
+        {
+            return Err(SimError::InvalidInput {
+                parameter: "semantic_memory",
+                reason: "penghapusan task neural belum disinkronkan",
+            });
+        }
         Ok(ReasoningCheckpoint {
             version: 1,
             network: self.network.clone(),
@@ -52,6 +82,11 @@ impl ReasoningEngine {
             context_frames: self.context_frames.iter().cloned().collect(),
             calibration: self.calibration.clone(),
             memory_fingerprint: self.memory.checkpoint_fingerprint()?,
+            semantic_memory_fingerprint: self
+                .semantic_memory
+                .as_ref()
+                .map(crate::SemanticMemory::checkpoint_fingerprint)
+                .transpose()?,
         })
     }
 }

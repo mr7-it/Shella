@@ -11,6 +11,7 @@ mod integrity;
 mod licenses;
 mod nusax;
 mod relations;
+mod wordnet;
 
 pub use datasets::{DatasetLoadReport, DatasetLoader, StopwordSet};
 pub use hunspell::{HunspellAffixKind, HunspellAffixRule, HunspellAnalysis, HunspellRoot};
@@ -26,6 +27,7 @@ pub use nusax::{
     NusaXSplit, NusaXWordPair,
 };
 pub use relations::{LexicalAnalysis, LexicalRelation, LexicalRelationType};
+pub use wordnet::{WordNetBahasaDataset, WordNetBahasaDefinition, WordNetBahasaMember};
 
 const LEXICON_SCHEMA_VERSION: u32 = 1;
 

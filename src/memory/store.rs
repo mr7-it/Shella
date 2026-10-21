@@ -5,6 +5,7 @@ use super::{
 use crate::SimError;
 use fs2::FileExt;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs::{File, OpenOptions},
@@ -27,6 +28,15 @@ pub struct MemoryStore {
 }
 
 impl MemoryStore {
+    pub(crate) fn checkpoint_fingerprint(&self) -> Result<String, SimError> {
+        let bytes =
+            serde_json::to_vec(&self.data).map_err(|error| SimError::SerializationFailed {
+                subsystem: "memory store fingerprint",
+                reason: error.to_string(),
+            })?;
+        Ok(format!("{:x}", Sha256::digest(bytes)))
+    }
+
     /// Membuka database eksklusif atau membuat database kosong pada path yang diberikan.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SimError> {
         let path = normalize_path(path.as_ref())?;

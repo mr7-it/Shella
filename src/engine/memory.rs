@@ -2,6 +2,59 @@ use super::ReasoningEngine;
 use crate::{CausalAssociation, ReplayReport, SimError};
 
 impl ReasoningEngine {
+    /// Menyelesaikan penghapusan task neural yang dijurnal oleh SemanticMemory.
+    pub fn synchronize_persistent_memories(&mut self) -> Result<usize, SimError> {
+        let Some(semantic_memory) = self.semantic_memory.as_ref() else {
+            return Ok(0);
+        };
+        let pending = semantic_memory.pending_learning_task_deletions();
+        let mut removed = 0;
+        for task_id in pending {
+            self.context_frames
+                .retain(|frame| frame.context_id != task_id);
+            if self.active_context_id.as_deref() == Some(task_id.as_str()) {
+                self.active_context_id = None;
+            }
+            removed += self.memory.discard_task(&task_id)?;
+            self.semantic_memory
+                .as_mut()
+                .ok_or(SimError::InvalidInput {
+                    parameter: "semantic_memory",
+                    reason: "semantic memory dilepas saat sinkronisasi",
+                })?
+                .complete_learning_task_deletion(&task_id)?;
+        }
+        Ok(removed)
+    }
+
+    pub fn remove_semantic_concept(&mut self, word_id: crate::WordID) -> Result<bool, SimError> {
+        self.synchronize_persistent_memories()?;
+        let removed = self
+            .semantic_memory
+            .as_mut()
+            .ok_or(SimError::InvalidInput {
+                parameter: "semantic_memory",
+                reason: "ReasoningEngine belum memasang SemanticMemory",
+            })?
+            .remove_concept(word_id)?;
+        self.synchronize_persistent_memories()?;
+        Ok(removed)
+    }
+
+    pub fn forget_semantic_context(&mut self, context_id: &str) -> Result<bool, SimError> {
+        self.synchronize_persistent_memories()?;
+        let removed = self
+            .semantic_memory
+            .as_mut()
+            .ok_or(SimError::InvalidInput {
+                parameter: "semantic_memory",
+                reason: "ReasoningEngine belum memasang SemanticMemory",
+            })?
+            .forget_context(context_id)?;
+        self.synchronize_persistent_memories()?;
+        Ok(removed)
+    }
+
     /// Menghitung asosiasi fitur-label dari pengalaman berulang dalam task.
     pub fn causal_associations(
         &self,
