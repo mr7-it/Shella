@@ -1,6 +1,7 @@
 use super::{GenerativeError, Result};
 use crate::language::{DatasetLoader, DatasetProvenance, LicenseRegistry, NusaXSplit};
 use serde::{Deserialize, Serialize};
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeSet, HashSet},
@@ -233,6 +234,152 @@ impl CorpusSplit {
         };
         result.validate_disjoint_ids()?;
         Ok(result)
+    }
+
+    /// Memuat split korpus berlisensi yang sudah disiapkan, tanpa membentuk ulang split.
+    /// Manifest, checksum provenance, jumlah karakter, dan keunikan ID divalidasi sebelum training.
+    pub fn load_prepared_json(json_path: impl AsRef<Path>) -> Result<Self> {
+        let json_path = json_path.as_ref();
+        let metadata = fs::metadata(json_path)?;
+        if metadata.len() > 512 * 1024 * 1024 {
+            return Err(GenerativeError::InvalidInput {
+                parameter: "prepared_corpus",
+                reason: "berkas korpus JSON melebihi batas 512 MiB",
+            });
+        }
+        let bytes = fs::read(json_path)?;
+        let corpus: Self = serde_json::from_slice(&bytes)?;
+        if corpus.manifest.format_version != 1 {
+            return Err(GenerativeError::InvalidInput {
+                parameter: "prepared_corpus",
+                reason: "format_version korpus harus 1",
+            });
+        }
+        let source = &corpus.manifest.source;
+        if source.dataset_id.trim().is_empty()
+            || source.repository_url.trim().is_empty()
+            || source.license_id.trim().is_empty()
+            || !source.license_url.starts_with("https://")
+            || source.source_file_sha256.len() != 64
+            || source.source_file_git_blob_sha1.len() != 40
+            || source.source_file_size_bytes == 0
+        {
+            return Err(GenerativeError::InvalidInput {
+                parameter: "prepared_corpus_provenance",
+                reason: "metadata sumber, lisensi, atau checksum tidak lengkap",
+            });
+        }
+        let provenance_relative_path = Path::new(&source.source_file_path);
+        if provenance_relative_path.is_absolute()
+            || provenance_relative_path
+                .components()
+                .any(|component| component == std::path::Component::ParentDir)
+        {
+            return Err(GenerativeError::InvalidInput {
+                parameter: "prepared_corpus_provenance",
+                reason: "path file provenance harus relatif terhadap folder korpus",
+            });
+        }
+        let local_provenance_path = json_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(provenance_relative_path);
+        let provenance_path = if local_provenance_path.is_file() {
+            local_provenance_path
+        } else {
+            provenance_relative_path.to_path_buf()
+        };
+        let provenance_bytes = fs::read(provenance_path)?;
+        let mut git_blob_hasher = Sha1::new();
+        git_blob_hasher.update(format!("blob {}\0", provenance_bytes.len()).as_bytes());
+        git_blob_hasher.update(&provenance_bytes);
+        let actual_git_blob_sha1 = format!("{:x}", git_blob_hasher.finalize());
+        let actual_sha256 = format!("{:x}", Sha256::digest(&provenance_bytes));
+        if provenance_bytes.len() as u64 != source.source_file_size_bytes
+            || actual_git_blob_sha1 != source.source_file_git_blob_sha1
+            || actual_sha256 != source.source_file_sha256
+        {
+            return Err(GenerativeError::InvalidInput {
+                parameter: "prepared_corpus_provenance",
+                reason: "ukuran, SHA-256, atau Git blob file provenance tidak cocok",
+            });
+        }
+        corpus.validate_disjoint_ids()?;
+
+        let manifest_split = &corpus.manifest.split;
+        if manifest_split.training_fraction_ppm == 0
+            || manifest_split.validation_fraction_ppm == 0
+            || manifest_split.test_fraction_ppm == 0
+            || manifest_split.training_fraction_ppm
+                + manifest_split.validation_fraction_ppm
+                + manifest_split.test_fraction_ppm
+                != 1_000_000
+        {
+            return Err(GenerativeError::InvalidInput {
+                parameter: "prepared_corpus_split",
+                reason: "proporsi split manifest harus positif dan berjumlah satu juta ppm",
+            });
+        }
+        let ids_match = |records: &[CorpusRecord], listed_ids: &[usize]| {
+            let actual = records
+                .iter()
+                .map(|record| record.id)
+                .collect::<HashSet<_>>();
+            let listed = listed_ids.iter().copied().collect::<HashSet<_>>();
+            actual.len() == records.len() && listed.len() == listed_ids.len() && actual == listed
+        };
+        if !ids_match(&corpus.training, &manifest_split.training_ids)
+            || !ids_match(&corpus.validation, &manifest_split.validation_ids)
+            || !ids_match(&corpus.test, &manifest_split.test_ids)
+        {
+            return Err(GenerativeError::InvalidInput {
+                parameter: "prepared_corpus_split",
+                reason: "ID record tidak cocok dengan ID yang dicatat pada manifest split",
+            });
+        }
+        let all_records = corpus
+            .training
+            .iter()
+            .chain(&corpus.validation)
+            .chain(&corpus.test)
+            .collect::<Vec<_>>();
+        let expected_source_records = all_records
+            .len()
+            .saturating_add(manifest_split.exact_duplicates_removed)
+            .saturating_add(manifest_split.near_duplicates_removed);
+        if expected_source_records != manifest_split.source_records {
+            return Err(GenerativeError::InvalidInput {
+                parameter: "prepared_corpus_split",
+                reason: "jumlah sumber tidak konsisten dengan record dan deduplikasi manifest",
+            });
+        }
+        for record in &all_records {
+            if record.text.is_empty()
+                || record.text.len() > 1_000_000
+                || normalize_training_text(&record.text)? != record.text
+            {
+                return Err(GenerativeError::InvalidInput {
+                    parameter: "prepared_corpus_text",
+                    reason: "teks harus nonkosong, maksimal 1 MiB, dan sudah dinormalisasi NFC/lowercase",
+                });
+            }
+        }
+        let character_count = |records: &[CorpusRecord]| {
+            records
+                .iter()
+                .map(|record| record.text.chars().count())
+                .sum::<usize>()
+        };
+        if character_count(&corpus.training) != corpus.manifest.training_characters
+            || character_count(&corpus.validation) != corpus.manifest.validation_characters
+            || character_count(&corpus.test) != corpus.manifest.test_characters
+        {
+            return Err(GenerativeError::InvalidInput {
+                parameter: "prepared_corpus_token_count",
+                reason: "jumlah karakter/token teks tidak cocok dengan manifest",
+            });
+        }
+        Ok(corpus)
     }
 
     pub fn validate_disjoint_ids(&self) -> Result<()> {

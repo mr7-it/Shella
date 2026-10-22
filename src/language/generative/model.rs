@@ -1,4 +1,4 @@
-use super::{GenerativeError, Result, tokenizer::PAD_ID};
+use super::{GenerativeError, Result, lif_head::DifferentiableLifHead, tokenizer::PAD_ID};
 use candle_core::{D, DType, Device, Tensor};
 use candle_nn::{Embedding, LayerNorm, Linear, Module, VarBuilder, VarMap};
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,7 @@ const MAX_HEAD_COUNT: usize = 8;
 const MAX_CONTEXT_LENGTH: usize = 256;
 const MAX_VOCABULARY_SIZE: usize = 4100;
 const MAX_PARAMETER_COUNT: usize = 4_000_000;
+const LAYER_NORM_EPS: f32 = 1e-5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -84,7 +85,11 @@ impl TransformerConfig {
                     .saturating_mul(self.hidden_size)
                     .saturating_mul(self.hidden_size),
             )
-            .saturating_add(vocabulary_size.saturating_mul(self.hidden_size));
+            .saturating_add(vocabulary_size.saturating_mul(self.hidden_size))
+            .saturating_add(self.hidden_size.saturating_mul(16))
+            .saturating_add(16 * 16)
+            .saturating_add(16 * 3)
+            .saturating_add(16 + 16 + 3);
         if estimated_parameters > MAX_PARAMETER_COUNT {
             return Err(GenerativeError::InvalidConfig {
                 parameter: "model_size",
@@ -99,6 +104,7 @@ pub(crate) struct CausalLanguageModel {
     pub(crate) config: TransformerConfig,
     pub(crate) variables: VarMap,
     decoder: Decoder,
+    lif_head: DifferentiableLifHead,
 }
 
 impl CausalLanguageModel {
@@ -107,12 +113,14 @@ impl CausalLanguageModel {
         let device = Device::Cpu;
         let mut variables = VarMap::new();
         let builder = VarBuilder::from_varmap(&variables, DType::F32, &device);
-        let decoder = Decoder::new(&config, vocabulary_size, builder)?;
+        let decoder = Decoder::new(&config, vocabulary_size, builder.clone())?;
+        let lif_head = DifferentiableLifHead::new(config.hidden_size, builder.pp("lif_head"))?;
         initialize_variables(&mut variables, &config, vocabulary_size)?;
         Ok(Self {
             config,
             variables,
             decoder,
+            lif_head,
         })
     }
 
@@ -125,6 +133,18 @@ impl CausalLanguageModel {
             });
         }
         self.decoder.forward(input_ids, batch, sequence)
+    }
+
+    pub(crate) fn action_logits(&self, input_ids: &Tensor) -> Result<Tensor> {
+        let (batch, sequence) = input_ids.dims2()?;
+        if batch == 0 || sequence == 0 || sequence > self.config.max_context {
+            return Err(GenerativeError::InvalidInput {
+                parameter: "input_ids",
+                reason: "batch dan sequence harus tidak kosong; panjang tidak boleh melebihi konteks",
+            });
+        }
+        let hidden = self.decoder.forward_hidden(input_ids, batch, sequence)?;
+        self.lif_head.forward(&hidden)
     }
 
     pub(crate) fn variables(&self) -> Vec<candle_core::Var> {
@@ -187,7 +207,11 @@ impl Decoder {
                 )
             })
             .collect::<Result<Vec<_>>>()?;
-        let final_norm = candle_nn::layer_norm(config.hidden_size, 1e-5, builder.pp("final_norm"))?;
+        let final_norm = candle_nn::layer_norm(
+            config.hidden_size,
+            f64::from(LAYER_NORM_EPS),
+            builder.pp("final_norm"),
+        )?;
         let output = candle_nn::linear(config.hidden_size, vocabulary_size, builder.pp("output"))?;
         Ok(Self {
             token_embedding,
@@ -200,6 +224,18 @@ impl Decoder {
     }
 
     fn forward(&self, input_ids: &Tensor, batch: usize, sequence: usize) -> Result<Tensor> {
+        let hidden = self.forward_hidden(input_ids, batch, sequence)?;
+        let logits = self.output.forward(&hidden)?;
+        if logits.dim(D::Minus1)? != self.vocabulary_size {
+            return Err(GenerativeError::Backend {
+                operation: "vocabulary projection",
+                reason: "output head menghasilkan dimensi yang tidak cocok".to_owned(),
+            });
+        }
+        Ok(logits)
+    }
+
+    fn forward_hidden(&self, input_ids: &Tensor, batch: usize, sequence: usize) -> Result<Tensor> {
         let positions = Tensor::from_vec(
             (0..sequence).map(|value| value as u32).collect::<Vec<_>>(),
             (1, sequence),
@@ -212,15 +248,7 @@ impl Decoder {
         for block in &self.blocks {
             hidden = block.forward(&hidden, &causal_mask, batch, sequence)?;
         }
-        let hidden = self.final_norm.forward(&hidden)?;
-        let logits = self.output.forward(&hidden)?;
-        if logits.dim(D::Minus1)? != self.vocabulary_size {
-            return Err(GenerativeError::Backend {
-                operation: "vocabulary projection",
-                reason: "output head menghasilkan dimensi yang tidak cocok".to_owned(),
-            });
-        }
-        Ok(logits)
+        differentiable_layer_norm(&self.final_norm, &hidden)
     }
 }
 
@@ -239,7 +267,11 @@ struct TransformerBlock {
 impl TransformerBlock {
     fn new(hidden_size: usize, head_count: usize, builder: VarBuilder) -> Result<Self> {
         Ok(Self {
-            attention_norm: candle_nn::layer_norm(hidden_size, 1e-5, builder.pp("attention_norm"))?,
+            attention_norm: candle_nn::layer_norm(
+                hidden_size,
+                f64::from(LAYER_NORM_EPS),
+                builder.pp("attention_norm"),
+            )?,
             qkv: candle_nn::linear(hidden_size, hidden_size * 3, builder.pp("qkv"))?,
             attention_projection: candle_nn::linear(
                 hidden_size,
@@ -248,7 +280,7 @@ impl TransformerBlock {
             )?,
             feed_forward_norm: candle_nn::layer_norm(
                 hidden_size,
-                1e-5,
+                f64::from(LAYER_NORM_EPS),
                 builder.pp("feed_forward_norm"),
             )?,
             feed_forward_in: candle_nn::linear(
@@ -273,7 +305,7 @@ impl TransformerBlock {
         batch: usize,
         sequence: usize,
     ) -> Result<Tensor> {
-        let normalized = self.attention_norm.forward(input)?;
+        let normalized = differentiable_layer_norm(&self.attention_norm, input)?;
         let qkv = self.qkv.forward(&normalized)?;
         let head_size = self.hidden_size / self.head_count;
         let query = qkv
@@ -304,11 +336,26 @@ impl TransformerBlock {
             .reshape((batch, sequence, self.hidden_size))?;
         let projected = self.attention_projection.forward(&attended)?;
         let residual = input.broadcast_add(&projected)?;
-        let normalized = self.feed_forward_norm.forward(&residual)?;
+        let normalized = differentiable_layer_norm(&self.feed_forward_norm, &residual)?;
         let expanded = self.feed_forward_in.forward(&normalized)?.relu()?;
         let compressed = self.feed_forward_out.forward(&expanded)?;
         Ok(residual.broadcast_add(&compressed)?)
     }
+}
+
+/// Candle 0.8.4's fused `LayerNorm::forward` uses `apply_op3_no_bwd`; use the
+/// equivalent tensor expression so gradients reach the decoder blocks.
+fn differentiable_layer_norm(layer_norm: &LayerNorm, input: &Tensor) -> Result<Tensor> {
+    let bias = layer_norm.bias().ok_or(GenerativeError::Backend {
+        operation: "layer normalization",
+        reason: "decoder layer norm requires an affine bias".to_owned(),
+    })?;
+    Ok(candle_nn::ops::layer_norm_slow(
+        input,
+        layer_norm.weight(),
+        bias,
+        LAYER_NORM_EPS,
+    )?)
 }
 
 fn create_causal_mask(sequence: usize) -> Result<Tensor> {
@@ -381,6 +428,9 @@ fn initialize_variables(
     }
     set_layer_norm(variables, "final_norm", hidden)?;
     set_linear(variables, "output", hidden, vocabulary_size, &mut state)?;
+    set_linear(variables, "lif_head.input", hidden, 16, &mut state)?;
+    set_linear(variables, "lif_head.recurrent", 16, 16, &mut state)?;
+    set_linear(variables, "lif_head.actions", 16, 3, &mut state)?;
     Ok(())
 }
 
@@ -562,5 +612,70 @@ mod tests {
         let (loss, count) = masked_next_token_loss(&logits, &targets).unwrap();
         assert_eq!(count, doc.len() - 1);
         assert!(loss.to_scalar::<f32>().unwrap().is_finite());
+    }
+
+    #[test]
+    fn lif_action_loss_backpropagates_into_transformer_and_synaptic_parameters() {
+        let (model, tokenizer) = tiny_model();
+        let ids = tokenizer.encode_prompt("makan").unwrap();
+        let input = Tensor::from_vec(ids.clone(), (1, ids.len()), &Device::Cpu).unwrap();
+        let logits = model.action_logits(&input).unwrap();
+        let target = Tensor::from_vec(vec![0_u32], (1, 1), &Device::Cpu).unwrap();
+        let loss = candle_nn::ops::log_softmax(&logits, D::Minus1)
+            .unwrap()
+            .gather(&target, 1)
+            .unwrap()
+            .neg()
+            .unwrap()
+            .sum_all()
+            .unwrap();
+        let gradients = loss.backward().unwrap();
+        let variables = model.variables.data().lock().unwrap();
+        for required_name in ["blocks.0.qkv.weight", "lif_head.input.weight"] {
+            let variable = variables.get(required_name).unwrap();
+            let gradient = gradients
+                .get(variable.as_tensor())
+                .unwrap_or_else(|| panic!("tidak ada gradien untuk {required_name}"));
+            let values = gradient.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+            assert!(
+                values
+                    .iter()
+                    .any(|value| value.is_finite() && *value != 0.0)
+            );
+        }
+    }
+
+    #[test]
+    fn language_loss_backpropagates_into_decoder_and_token_embedding() {
+        let (model, tokenizer) = tiny_model();
+        let document = tokenizer.encode_document("makan").unwrap();
+        let input = Tensor::from_vec(
+            document[..document.len() - 1].to_vec(),
+            (1, document.len() - 1),
+            &Device::Cpu,
+        )
+        .unwrap();
+        let targets = Tensor::from_vec(
+            document[1..].to_vec(),
+            (1, document.len() - 1),
+            &Device::Cpu,
+        )
+        .unwrap();
+        let logits = model.forward(&input).unwrap();
+        let (loss, _) = masked_next_token_loss(&logits, &targets).unwrap();
+        let gradients = loss.backward().unwrap();
+        let variables = model.variables.data().lock().unwrap();
+        for required_name in ["blocks.0.qkv.weight", "token_embedding.weight"] {
+            let variable = variables.get(required_name).unwrap();
+            let gradient = gradients
+                .get(variable.as_tensor())
+                .unwrap_or_else(|| panic!("tidak ada gradien LM untuk {required_name}"));
+            let values = gradient.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+            assert!(
+                values
+                    .iter()
+                    .any(|value| value.is_finite() && *value != 0.0)
+            );
+        }
     }
 }

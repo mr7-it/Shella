@@ -1,9 +1,12 @@
 use serde_json::json;
 use shella::{
-    Candidate, CharacterTokenizer, ComputeDevice, DecisionPolicy, Engine, GenerationConfig,
-    GenerativeLanguageModel, LifConfig, LifNetwork, MemoryStore, RewardEvaluator,
-    RewardEvaluatorConfig, RewardModulatedStdpConfig, SdkInput as Input, StdpConfig, TextEncoder,
-    TransformerConfig, Vocabulary,
+    AnswerAbstentionReason, AnswerActionMap, Candidate, CharacterTokenizer, ComputeDevice,
+    DecisionPolicy, Engine, FeedbackAuthority, GenerationConfig, GenerativeLanguageModel,
+    HybridAction, HybridTrainingConfig, IndonesianVocabulary, LearningMemory, LexiconEntryInput,
+    LexiconMetadata, LifConfig, LifNetwork, LinguisticMetadata, MemoryStore, ReasoningConfig,
+    ReasoningEngine, RewardEvaluator, RewardEvaluatorConfig, RewardModulatedStdpConfig,
+    SdkInput as Input, SemanticMemory, SourceProvenance, StdpConfig, TextEncoder,
+    TransformerConfig, VerifiedActionExample, VerifiedAnswerStatus, Vocabulary,
 };
 use std::{
     collections::BTreeMap,
@@ -295,4 +298,180 @@ fn sdk_teks_ke_jaringan_terlatih_ke_evaluasi_decision_dan_memory() {
 
     fs::remove_file(checkpoint_path).expect("checkpoint cleanup");
     fs::remove_file(memory_path).expect("memory cleanup");
+}
+
+#[test]
+fn pipeline_jawaban_abstain_tanpa_evidence_sebelum_memanggil_transformer() {
+    let semantic_path = temp("verified-semantic");
+    let learning_path = temp("verified-learning");
+    let mut lexicon =
+        IndonesianVocabulary::new(LexiconMetadata::indonesian("integration vocabulary", "1"))
+            .expect("lexicon valid");
+    for (word, pos) in [
+        ("apakah", "PART"),
+        ("kucing", "NOUN"),
+        ("sebesar", "ADJ"),
+        ("rumah", "NOUN"),
+        ("manusia", "NOUN"),
+    ] {
+        lexicon
+            .upsert(LexiconEntryInput {
+                headword: word.to_owned(),
+                sources: vec![SourceProvenance {
+                    source_name: "SDK pipeline test lexicon".to_owned(),
+                    source_uri: "https://example.org/shella-sdk-test".to_owned(),
+                    license: "CC0-1.0".to_owned(),
+                    license_uri: "https://creativecommons.org/publicdomain/zero/1.0/".to_owned(),
+                    source_entry_id: format!("test:{word}"),
+                }],
+                linguistic: LinguisticMetadata {
+                    part_of_speech: Some(pos.to_owned()),
+                    lemma: Some(word.to_owned()),
+                    ..LinguisticMetadata::default()
+                },
+            })
+            .expect("entri lexicon");
+    }
+    let semantic = SemanticMemory::open(&semantic_path, lexicon.clone()).expect("semantic memory");
+    let base = LifNetwork::new(LifConfig::new(1.0, 10.0, 1.0, -65.0, -70.0, -60.0, 1), 4)
+        .expect("jaringan empat neuron");
+    let mut language = lexicon
+        .to_language_network(base.clone())
+        .expect("language network");
+    for (index, word) in ["apakah", "kucing", "sebesar", "rumah", "manusia"]
+        .into_iter()
+        .enumerate()
+    {
+        let word_id = lexicon
+            .lookup(word)
+            .expect("lookup word")
+            .expect("word exists")
+            .word_id;
+        let neuron = language.network().neuron_id(index % 4).expect("neuron id");
+        language.bind_word(word_id, &[neuron]).expect("bind word");
+    }
+    let mut reasoning = ReasoningEngine::new(
+        language.network().clone(),
+        LearningMemory::open(&learning_path).expect("learning memory"),
+        ReasoningConfig::new(1, 4, 0.0, 0.0, 0.0).expect("reasoning config"),
+    )
+    .with_semantic_memory(semantic);
+    let tokenizer = CharacterTokenizer::fit(["apakah kucing sebesar rumah manusia jawaban"])
+        .expect("tokenizer karakter");
+    let model = GenerativeLanguageModel::new(
+        TransformerConfig {
+            hidden_size: 8,
+            layer_count: 1,
+            head_count: 2,
+            max_context: 128,
+            seed: 7,
+            device: ComputeDevice::Cpu,
+        },
+        tokenizer,
+    )
+    .expect("model Transformer nyata");
+    let mut sdk_engine = Engine::new(base);
+    let result = sdk_engine
+        .session()
+        .answer_with_neural_review(
+            &mut reasoning,
+            &model,
+            "animal-question",
+            "Apakah kucing sebesar rumah manusia?",
+            &language,
+            10.0,
+            &[0, 1, 2, 3],
+            AnswerActionMap {
+                draft: 0,
+                approve: 1,
+                revise: 2,
+                abstain: 3,
+            },
+            8,
+            GenerationConfig {
+                max_new_tokens: 4,
+                temperature: 0.0,
+                top_k: None,
+                top_p: None,
+                seed: 11,
+            },
+        )
+        .expect("pipeline berhenti aman");
+    assert_eq!(result.status, VerifiedAnswerStatus::Abstained);
+    assert_eq!(
+        result.abstention_reason,
+        Some(AnswerAbstentionReason::InsufficientEvidence)
+    );
+    assert!(result.answer.is_none());
+    assert!(result.reviews.is_empty());
+    drop(reasoning);
+    drop(sdk_engine);
+    drop(model);
+    drop(language);
+    for path in [semantic_path, learning_path] {
+        fs::remove_file(&path).expect("store cleanup");
+        let mut lock_path = path.as_os_str().to_os_string();
+        lock_path.push(".lock");
+        fs::remove_file(PathBuf::from(lock_path)).expect("lock cleanup");
+    }
+}
+
+#[test]
+fn sdk_feedback_hybrid_menyimpan_model_checkpoint_dan_learning_memory() {
+    let memory_path = temp("hybrid-feedback-memory");
+    let checkpoint_path = temp("hybrid-feedback-checkpoint");
+    let prompt = "pertanyaan apakah kucing sebesar rumah bukti kucing lebih kecil dari rumah";
+    let candidate = "Kucing kecil.";
+    let target = "Tidak, kucing lebih kecil daripada rumah manusia.";
+    let tokenizer = CharacterTokenizer::fit([prompt, candidate, target, " calon jawaban "])
+        .expect("tokenizer feedback");
+    let mut model = GenerativeLanguageModel::new(
+        TransformerConfig {
+            hidden_size: 8,
+            layer_count: 1,
+            head_count: 2,
+            max_context: 128,
+            seed: 91,
+            device: ComputeDevice::Cpu,
+        },
+        tokenizer,
+    )
+    .expect("model nyata");
+    let memory = LearningMemory::open(&memory_path).expect("learning memory");
+    let mut engine = Engine::new(network()).with_learning_memory(memory);
+    let example = VerifiedActionExample {
+        source_id: "review/answer/1".to_owned(),
+        prompt: prompt.to_owned(),
+        candidate_response: Some(candidate.to_owned()),
+        target_response: Some(target.to_owned()),
+        expected_action: HybridAction::Answer,
+        authority: FeedbackAuthority::HumanConfirmed,
+    };
+    let outcome = {
+        let mut session = engine.session();
+        session
+            .learn_from_verified_feedback(
+                &mut model,
+                &[example],
+                HybridTrainingConfig::default(),
+                &checkpoint_path,
+            )
+            .expect("joint training and persistence")
+    };
+    assert_eq!(outcome.training.examples, 1);
+    assert_eq!(outcome.training.optimizer_steps, 1);
+    assert_eq!(outcome.learning_memory_record_ids.len(), 1);
+    assert_eq!(outcome.checkpoint_sha256.len(), 64);
+    assert_eq!(engine.learning_memory().expect("memory attached").len(), 1);
+    let restored = GenerativeLanguageModel::load_checkpoint(&checkpoint_path)
+        .expect("hybrid checkpoint reload");
+    assert!(restored.has_trained_hybrid_head());
+    drop(restored);
+    drop(engine);
+    drop(model);
+    fs::remove_file(&checkpoint_path).expect("checkpoint cleanup");
+    fs::remove_file(&memory_path).expect("memory cleanup");
+    let mut lock_path = memory_path.as_os_str().to_os_string();
+    lock_path.push(".lock");
+    fs::remove_file(PathBuf::from(lock_path)).expect("lock cleanup");
 }

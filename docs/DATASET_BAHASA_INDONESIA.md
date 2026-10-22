@@ -20,8 +20,8 @@ lisensi yang sama kecuali sumber menyatakannya.
 | [IndoNLI](https://github.com/ir-nlp-csui/indonli) | Repository tersedia; tidak ada revisi data yang dipin | JSONL dan arsip terjemahan tersedia upstream | Tidak ditemukan lisensi dataset yang mencakup anotasi dan teks sumber | Ditolak oleh registry; tidak diunduh, tidak diparse, dan tidak digunakan untuk evaluasi. |
 | [IndoSum](https://github.com/kata-ai/indosum) | Dataset Google Drive `1OgYbPfXFAv3TbwP1Qcwt_CC9cVWSJaco`; changelog `2019-03-20`; SHA-256 `34e5c504f711dd8ec0e87dbf10eb1dbaefca86717194f95a14476afeb8810108` | `tar.gz` 96,037,108 byte; JSONL per fold/split; ukuran arsip terurai 404,039,680 byte | CC BY-SA 4.0, tercantum di `README.txt` yang ikut dalam arsip; setiap record mempertahankan `source` dan `source_url` | Arsip dan notice data asli dibundel. Loader memverifikasi hash, membaca hanya satu JSONL split, memvalidasi record, menyediakan oracle extractive berlabel, dan menghitung token-level ROUGE-1 untuk kandidat pemanggil. Tidak ada summarizer yang dilatih. |
 
-Jalur pretraining neural yang tersedia menggunakan **hanya** file resmi
-NusaX-Senti Indonesia `train.csv` yang dipin di atas. Loader mengabaikan label
+Jalur pretraining CSV historis menggunakan **hanya** file resmi NusaX-Senti
+Indonesia `train.csv` yang dipin di atas. Loader mengabaikan label
 sentimen, menghapus duplikat sebelum membagi dokumen NusaX train secara
 deterministik menjadi train/validation/test internal; hanya train internal yang
 masuk optimizer, dan tokenizer di-fit dari train saja. Official NusaX
@@ -30,6 +30,24 @@ hanya dievaluasi setelah training. Provenance, source hash, ID per split, dan
 aturan deduplikasi tersimpan di checkpoint. Lisensi CC BY-SA 4.0 dan atribusi
 NusaX tetap berlaku pada penggunaan/redistribusi dataset sesuai syarat lisensi;
 jumlah aktual untuk sebuah run dicetak oleh CLI `shella-lm train`.
+
+CLI `shella-lm train` juga menerima split JSON prepared dengan manifest dan
+provenance tervalidasi; subkorpus hukum yang saat ini tersedia dijelaskan di bawah.
+
+Subkorpus terpisah dari lima teks undang-undang Indonesia dengan dasar domain
+publik Pasal 42(b) UU Hak Cipta, OCR, deduplikasi, split per dokumen, checksum,
+token count karakter, dan cara training melalui JSON dicatat di
+[`KORPUS_HUKUM_INDONESIA.md`](KORPUS_HUKUM_INDONESIA.md). Korpus ini tidak
+digabungkan otomatis dengan NusaX dan belum mewakili korpus bahasa Indonesia umum.
+
+Ekspansi korpus prosa Indonesia menggabungkan artikel namespace utama Wikipedia
+Bahasa Indonesia dari dump bertanggal dengan lima undang-undang tersebut. Pipeline
+menyaring bahasa dan blok prosa, mendeduplikasi, menyimpan atribusi/revisi serta
+lisensi per dokumen, dan membagi train/validasi/test menurut dokumen. Metode, sumber,
+batas hak, token count dan perintah build/train dicatat di
+[`KORPUS_BAHASA_INDONESIA_KOHEREN.md`](KORPUS_BAHASA_INDONESIA_KOHEREN.md); JSON
+prepared yang langsung diterima loader Shella ada di
+[`data/indonesian_coherent_corpus/prepared_corpus.json`](../data/indonesian_coherent_corpus/prepared_corpus.json).
 
 WordNet Bahasa r24 dipin ke commit `fb201ec6155dc5c3a23d76673cfbb28630bc9a67`
 `open-language/wordnets`; file membership dan definisi cocok dengan Git blob

@@ -69,7 +69,15 @@ fn train_command(options: BTreeMap<String, String>) -> Result<(), Box<dyn Error>
         ..DatasetSplitConfig::default()
     };
     let started = Instant::now();
-    let corpus = GenerativeLanguageModel::load_nusax_training_corpus(&dataset_path, split_config)?;
+    let corpus = if dataset_path.ends_with(".json") {
+        let prepared = CorpusSplit::load_prepared_json(&dataset_path)?;
+        if prepared.manifest.split.seed != split_config.seed {
+            return Err("--split-seed harus sama dengan seed pada manifest korpus JSON".into());
+        }
+        prepared
+    } else {
+        GenerativeLanguageModel::load_nusax_training_corpus(&dataset_path, split_config)?
+    };
     let config = TransformerConfig {
         hidden_size: parse_or(&options, "--hidden-size", 32_usize)?,
         layer_count: parse_or(&options, "--layers", 1_usize)?,
@@ -97,6 +105,9 @@ fn train_command(options: BTreeMap<String, String>) -> Result<(), Box<dyn Error>
     // Test split baru dipakai sesudah semua optimizer step selesai dan checkpoint ditulis.
     let restored = GenerativeLanguageModel::load_checkpoint(checkpoint_path)?;
     let final_test = restored.evaluate(&corpus.test, report.config.batch_size)?;
+    let training_model_tokens = encoded_token_count(&restored, &corpus.training)?;
+    let validation_model_tokens = encoded_token_count(&restored, &corpus.validation)?;
+    let test_model_tokens = encoded_token_count(&restored, &corpus.test)?;
     let output = TrainRunReport {
         source: &corpus.manifest.source,
         split: &corpus.manifest.split,
@@ -105,6 +116,9 @@ fn train_command(options: BTreeMap<String, String>) -> Result<(), Box<dyn Error>
         training_characters: corpus.manifest.training_characters,
         validation_characters: corpus.manifest.validation_characters,
         test_characters: corpus.manifest.test_characters,
+        training_model_tokens,
+        validation_model_tokens,
+        test_model_tokens,
         baseline_validation,
         final_validation,
         training: report,
@@ -114,9 +128,9 @@ fn train_command(options: BTreeMap<String, String>) -> Result<(), Box<dyn Error>
         checkpoint_sha256,
         training_and_evaluation_seconds: started.elapsed().as_secs_f64(),
         notes: [
-            "NusaX sentiment text only; label column is not a generation target.",
+            "Source, license basis, checksums, and document split are recorded in the corpus manifest.",
             "Tokenizer is fit on the model training split only.",
-            "No official validation/test text and no NusaX-MT duplicate column enters optimizer updates.",
+            "Model-token counts use CharacterTokenizer encoding and include BOS/EOS per document.",
             "Test split is evaluated only after training; validation baseline/final metrics are paired.",
             "Checkpoint contains model weights and provenance/metrics, not AdamW optimizer state.",
         ],
@@ -201,11 +215,15 @@ fn evaluate_command(options: BTreeMap<String, String>) -> Result<(), Box<dyn Err
         validation_fraction: manifest.split.validation_fraction_ppm as f64 / 1_000_000.0,
         test_fraction: manifest.split.test_fraction_ppm as f64 / 1_000_000.0,
     };
-    let corpus = CorpusSplit::load_nusax_training(
-        dataset_path,
-        &shella::language::LicenseRegistry::verified_sources(),
-        split,
-    )?;
+    let corpus = if dataset_path.ends_with(".json") {
+        CorpusSplit::load_prepared_json(&dataset_path)?
+    } else {
+        CorpusSplit::load_nusax_training(
+            dataset_path,
+            &shella::language::LicenseRegistry::verified_sources(),
+            split,
+        )?
+    };
     if corpus.manifest != *manifest {
         return Err("dataset/provenance/split tidak sama dengan checkpoint".into());
     }
@@ -224,6 +242,9 @@ struct TrainRunReport<'a> {
     training_characters: usize,
     validation_characters: usize,
     test_characters: usize,
+    training_model_tokens: usize,
+    validation_model_tokens: usize,
+    test_model_tokens: usize,
     baseline_validation: shella::EvaluationMetrics,
     final_validation: shella::EvaluationMetrics,
     training: shella::TrainingReport,
@@ -233,6 +254,20 @@ struct TrainRunReport<'a> {
     checkpoint_sha256: String,
     training_and_evaluation_seconds: f64,
     notes: [&'static str; 5],
+}
+
+fn encoded_token_count(
+    model: &GenerativeLanguageModel,
+    records: &[shella::CorpusRecord],
+) -> Result<usize, Box<dyn Error>> {
+    let mut total = 0_usize;
+    for record in records {
+        let encoded = model.tokenizer().encode_document(&record.text)?.len();
+        total = total
+            .checked_add(encoded)
+            .ok_or("jumlah token melampaui kapasitas integer")?;
+    }
+    Ok(total)
 }
 
 fn required<'a>(

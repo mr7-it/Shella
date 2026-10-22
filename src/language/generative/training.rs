@@ -1,7 +1,9 @@
 use super::{
-    CorpusRecord, CorpusSplit, GenerativeError, GenerativeLanguageModel, Result,
+    CorpusRecord, CorpusSplit, FeedbackAuthority, FeedbackAuthorityCounts, GenerativeError,
+    GenerativeLanguageModel, HybridTrainingConfig, HybridTrainingReport, Result,
+    VerifiedActionExample,
     model::masked_next_token_loss,
-    tokenizer::{CharacterTokenizer, PAD_ID},
+    tokenizer::{CharacterTokenizer, EOS_ID, PAD_ID, UNK_ID},
 };
 use candle_core::{Device, Tensor, backprop::GradStore};
 use candle_nn::{AdamW, Optimizer, ParamsAdamW};
@@ -244,6 +246,203 @@ pub(crate) fn train_model(
         parameter_count: model.parameter_count(),
         optimizer: "Candle AdamW".to_owned(),
         optimizer_state_saved: false,
+    })
+}
+
+pub(crate) fn train_on_verified_feedback(
+    model: &mut GenerativeLanguageModel,
+    examples: &[VerifiedActionExample],
+    config: HybridTrainingConfig,
+) -> Result<HybridTrainingReport> {
+    config.validate(examples.len())?;
+    if model.config().max_context < 3 {
+        return Err(GenerativeError::InvalidConfig {
+            parameter: "max_context",
+            reason: "joint feedback training membutuhkan sedikitnya tiga posisi konteks",
+        });
+    }
+    let mut source_ids = std::collections::BTreeSet::new();
+    for example in examples {
+        example.validate()?;
+        model.tokenizer.encode_characters(&example.prompt)?;
+        let mut decision_text = example.prompt.clone();
+        if let Some(candidate) = &example.candidate_response {
+            decision_text.push_str(" calon jawaban ");
+            decision_text.push_str(candidate);
+        }
+        model.tokenizer.encode_characters(&decision_text)?;
+        for response in [&example.candidate_response, &example.target_response]
+            .into_iter()
+            .flatten()
+        {
+            model.tokenizer.encode_characters(response)?;
+        }
+        if let Some(target) = &example.target_response {
+            if model.tokenizer.encode_characters(target)?.contains(&UNK_ID) {
+                return Err(GenerativeError::InvalidInput {
+                    parameter: "target_response",
+                    reason: "jawaban target harus menggunakan karakter yang ada di tokenizer training",
+                });
+            }
+        }
+        if !source_ids.insert(example.source_id.as_str()) {
+            return Err(GenerativeError::InvalidInput {
+                parameter: "feedback_source_id",
+                reason: "ID sumber tidak boleh berulang dalam satu batch feedback",
+            });
+        }
+    }
+
+    let variables = model.backend.variables();
+    let mut optimizer = AdamW::new(
+        variables.clone(),
+        ParamsAdamW {
+            lr: config.learning_rate,
+            weight_decay: 0.0,
+            ..Default::default()
+        },
+    )?;
+    let mut order = (0..examples.len()).collect::<Vec<_>>();
+    let mut shuffle_state = config.seed;
+    let mut language_loss_sum = 0.0_f64;
+    let mut language_examples_seen = 0usize;
+    let mut action_loss_sum = 0.0_f64;
+    let mut correct_actions = 0usize;
+    let mut optimizer_steps = 0usize;
+
+    for _epoch in 0..config.epochs {
+        deterministic_shuffle(&mut order, &mut shuffle_state);
+        for indices in order.chunks(config.batch_size) {
+            let mut combined_loss: Option<Tensor> = None;
+            for index in indices {
+                let example = &examples[*index];
+                let maximum_context = model.config().max_context;
+                let mut prompt_ids = model.tokenizer.encode_prompt(&example.prompt)?;
+                let mut response_ids = if let Some(response) = &example.target_response {
+                    let ids = model.tokenizer.encode_characters(response)?;
+                    if ids.is_empty() || ids.contains(&UNK_ID) {
+                        return Err(GenerativeError::InvalidInput {
+                            parameter: "target_response",
+                            reason: "jawaban target harus menggunakan karakter yang ada di tokenizer training",
+                        });
+                    }
+                    ids
+                } else {
+                    Vec::new()
+                };
+                if !response_ids.is_empty() {
+                    response_ids.truncate(maximum_context.saturating_sub(2));
+                    response_ids.push(EOS_ID);
+                    let prompt_capacity = maximum_context.saturating_sub(response_ids.len()).max(1);
+                    if prompt_ids.len() > prompt_capacity {
+                        let suffix = prompt_ids
+                            .split_off(prompt_ids.len() - prompt_capacity.saturating_sub(1));
+                        prompt_ids.truncate(1);
+                        prompt_ids.extend(suffix);
+                    }
+                } else if prompt_ids.len() > maximum_context {
+                    prompt_ids.truncate(maximum_context);
+                }
+                let mut decision_text = example.prompt.clone();
+                if let Some(candidate) = &example.candidate_response {
+                    decision_text.push_str(" calon jawaban ");
+                    decision_text.push_str(candidate);
+                }
+                let mut action_input_ids = model.tokenizer.encode_prompt(&decision_text)?;
+                action_input_ids.truncate(maximum_context);
+                let action_inputs = Tensor::from_vec(
+                    action_input_ids.clone(),
+                    (1, action_input_ids.len()),
+                    &Device::Cpu,
+                )?;
+                let action_logits = model.backend.action_logits(&action_inputs)?;
+                let action_label =
+                    Tensor::from_vec(vec![example.expected_action.index()], (1, 1), &Device::Cpu)?;
+                let log_probabilities =
+                    candle_nn::ops::log_softmax(&action_logits, candle_core::D::Minus1)?;
+                let action_loss = log_probabilities
+                    .gather(&action_label, 1)?
+                    .squeeze(1)?
+                    .neg()?
+                    .sum_all()?;
+                let probabilities =
+                    candle_nn::ops::softmax(&action_logits, candle_core::D::Minus1)?
+                        .to_vec2::<f32>()?;
+                let predicted = probabilities.first().and_then(|row| {
+                    row.iter()
+                        .enumerate()
+                        .max_by(|left, right| left.1.total_cmp(right.1))
+                        .map(|(class, _)| class)
+                });
+                correct_actions +=
+                    usize::from(predicted == Some(example.expected_action.index() as usize));
+                action_loss_sum += f64::from(action_loss.to_scalar::<f32>()?);
+                let mut weighted = action_loss.affine(config.action_loss_weight, 0.0)?;
+                if !response_ids.is_empty() && config.language_loss_weight > 0.0 {
+                    let mut input_values = prompt_ids.clone();
+                    input_values.extend_from_slice(&response_ids[..response_ids.len() - 1]);
+                    let mut target_values = vec![PAD_ID; prompt_ids.len().saturating_sub(1)];
+                    target_values.extend_from_slice(&response_ids);
+                    let inputs = Tensor::from_vec(
+                        input_values.clone(),
+                        (1, input_values.len()),
+                        &Device::Cpu,
+                    )?;
+                    let targets =
+                        Tensor::from_vec(target_values, (1, input_values.len()), &Device::Cpu)?;
+                    let language_logits = model.backend.forward(&inputs)?;
+                    let (language_loss, _) = masked_next_token_loss(&language_logits, &targets)?;
+                    language_loss_sum += f64::from(language_loss.to_scalar::<f32>()?);
+                    language_examples_seen += 1;
+                    weighted = weighted
+                        .broadcast_add(&language_loss.affine(config.language_loss_weight, 0.0)?)?;
+                }
+                combined_loss = Some(match combined_loss {
+                    Some(accumulated) => accumulated.broadcast_add(&weighted)?,
+                    None => weighted,
+                });
+            }
+            let batch_loss = combined_loss
+                .ok_or(GenerativeError::InvalidInput {
+                    parameter: "feedback_batch",
+                    reason: "batch feedback kosong",
+                })?
+                .affine(1.0 / indices.len() as f64, 0.0)?;
+            let mut gradients = batch_loss.backward()?;
+            clip_gradients(&mut gradients, &variables, config.gradient_clip_norm)?;
+            optimizer.step(&gradients)?;
+            optimizer_steps = optimizer_steps
+                .checked_add(1)
+                .ok_or(GenerativeError::Numerical {
+                    operation: "hybrid feedback optimizer step counter",
+                })?;
+        }
+    }
+
+    let examples_seen = examples.len().saturating_mul(config.epochs);
+    let language_examples_seen = language_examples_seen.max(1);
+    let mut authority_counts = FeedbackAuthorityCounts {
+        human_confirmed: 0,
+        trusted_evaluator: 0,
+    };
+    for example in examples {
+        match example.authority {
+            FeedbackAuthority::HumanConfirmed => authority_counts.human_confirmed += 1,
+            FeedbackAuthority::TrustedEvaluator => authority_counts.trusted_evaluator += 1,
+        }
+    }
+    Ok(HybridTrainingReport {
+        epochs: config.epochs,
+        examples: examples.len(),
+        optimizer_steps,
+        mean_language_loss: language_loss_sum / language_examples_seen as f64,
+        mean_action_loss: action_loss_sum / examples_seen as f64,
+        training_action_accuracy: correct_actions as f64 / examples_seen as f64,
+        feedback_sources: examples
+            .iter()
+            .map(|example| example.source_id.clone())
+            .collect(),
+        authority_counts,
     })
 }
 
@@ -564,5 +763,88 @@ mod tests {
         };
         assert!(invalid.validate(&model).is_err());
         assert!(DatasetSplitConfig::default().validate().is_ok());
+    }
+
+    #[test]
+    fn verified_feedback_updates_transformer_and_lif_head_together() {
+        let text = "apakah kucing sebesar rumah?";
+        let candidate = "kucing umumnya lebih kecil.";
+        let tokenizer = CharacterTokenizer::fit([text, candidate]).unwrap();
+        let mut model = GenerativeLanguageModel::new(
+            TransformerConfig {
+                hidden_size: 8,
+                layer_count: 1,
+                head_count: 2,
+                max_context: 16,
+                seed: 207,
+                device: super::super::ComputeDevice::Cpu,
+            },
+            tokenizer,
+        )
+        .unwrap();
+        let before = model.backend.parameter_snapshot().unwrap();
+        let example = VerifiedActionExample {
+            source_id: "unit-feedback-207".to_owned(),
+            prompt: text.to_owned(),
+            candidate_response: Some(candidate.to_owned()),
+            target_response: Some(candidate.to_owned()),
+            expected_action: super::super::HybridAction::Answer,
+            authority: FeedbackAuthority::HumanConfirmed,
+        };
+        let report = model
+            .train_on_verified_feedback(&[example], HybridTrainingConfig::default())
+            .unwrap();
+        let after = model.backend.parameter_snapshot().unwrap();
+        let prediction = model.predict_hybrid_action(text).unwrap();
+        assert!(before.iter().zip(&after).any(|(left, right)| left != right));
+        assert_eq!(report.optimizer_steps, 1);
+        assert!(report.mean_language_loss.is_finite());
+        assert!(report.mean_action_loss.is_finite());
+        assert!(
+            prediction
+                .probabilities
+                .iter()
+                .all(|value| value.is_finite())
+        );
+        assert!((prediction.probabilities.iter().sum::<f32>() - 1.0).abs() < 1e-5);
+        assert!(model.has_trained_hybrid_head());
+    }
+
+    #[test]
+    fn verified_feedback_rejects_duplicate_sources_before_update() {
+        let text = "bukti nyata";
+        let tokenizer = CharacterTokenizer::fit([text]).unwrap();
+        let mut model = GenerativeLanguageModel::new(
+            TransformerConfig {
+                hidden_size: 8,
+                layer_count: 1,
+                head_count: 2,
+                max_context: 8,
+                seed: 208,
+                device: super::super::ComputeDevice::Cpu,
+            },
+            tokenizer,
+        )
+        .unwrap();
+        let example = VerifiedActionExample {
+            source_id: "duplicate-source".to_owned(),
+            prompt: text.to_owned(),
+            candidate_response: None,
+            target_response: None,
+            expected_action: super::super::HybridAction::Abstain,
+            authority: FeedbackAuthority::TrustedEvaluator,
+        };
+        let before = model.backend.parameter_snapshot().unwrap();
+        assert!(
+            model
+                .train_on_verified_feedback(
+                    &[example.clone(), example],
+                    HybridTrainingConfig::default()
+                )
+                .is_err()
+        );
+        let after = model.backend.parameter_snapshot().unwrap();
+        assert_eq!(before, after);
+        assert!(!model.has_trained_hybrid_head());
     }
 }

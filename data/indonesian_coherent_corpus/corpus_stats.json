@@ -1,0 +1,89 @@
+{
+  "collection_id": "shella-indonesian-coherent-2026-10-22",
+  "snapshot_date": "2026-10-22",
+  "archive": {
+    "file_name": "idwiki-20260701-pages-articles-multistream.xml.bz2",
+    "download_url": "https://dumps.wikimedia.org/idwiki/20260701/idwiki-20260701-pages-articles-multistream.xml.bz2",
+    "snapshot_directory": "https://dumps.wikimedia.org/idwiki/20260701/",
+    "official_sha1": "522c21bfe2bc9bfb8361a0cb6ac43f809c72021e",
+    "verified_sha1": "522c21bfe2bc9bfb8361a0cb6ac43f809c72021e",
+    "sha256": "c8abefcddb80ce38a0668ac8b33199646bd515b17b17411b5da4cb5ee5360405",
+    "size_bytes": 1293461998,
+    "dump_snapshot": "20260701"
+  },
+  "token_definition": "Shella CharacterTokenizer: one Unicode code point after NFC/lowercase/whitespace normalization; model_character_tokens excludes BOS/EOS; encoded_tokens_with_bos_eos includes both per document.",
+  "selection_and_filtering": {
+    "pages_seen": 1863345,
+    "namespace_0_pages": 1444591,
+    "eligible_indonesian_articles": 186640,
+    "redirects": 665145,
+    "language_not_indonesian": 9290,
+    "too_short": 333478,
+    "wikitext_too_short": 243608,
+    "non_main_namespace": 418754,
+    "low_alphabetic_ratio": 44,
+    "not_enough_prose": 6223,
+    "low_vocabulary_diversity": 126,
+    "explicit_nonfree_or_rights_warning": 37,
+    "selected_after_character_budget": 20000,
+    "selected_wikipedia_characters": 70904993,
+    "candidate_heap_capacity": 20000
+  },
+  "quality_filters": [
+    "language id detected by langid",
+    "at least 900 normalized characters",
+    "at least two substantial prose paragraphs",
+    "at least 100 words and five sentences",
+    "alphabetic ratio >= 0.75",
+    "unique word ratio >= 0.20",
+    "maximum 1 MiB per prepared record",
+    "explicit nonfree/fair-use/copyvio warning templates excluded"
+  ],
+  "documents_before_deduplication": 20005,
+  "documents_after_deduplication": 20005,
+  "exact_duplicates_removed": 0,
+  "near_duplicates_removed": 0,
+  "split_counts_by_documents": {
+    "training": 19604,
+    "validation": 200,
+    "test": 201
+  },
+  "split_metrics": {
+    "training": {
+      "documents": 19604,
+      "model_character_tokens": 69927479,
+      "encoded_tokens_with_bos_eos": 69966687,
+      "target_tokens_with_eos": 69947083,
+      "whitespace_words": 9675157,
+      "characters": 69927479
+    },
+    "validation": {
+      "documents": 200,
+      "model_character_tokens": 708033,
+      "encoded_tokens_with_bos_eos": 708433,
+      "target_tokens_with_eos": 708233,
+      "whitespace_words": 98859,
+      "characters": 708033
+    },
+    "test": {
+      "documents": 201,
+      "model_character_tokens": 661831,
+      "encoded_tokens_with_bos_eos": 662233,
+      "target_tokens_with_eos": 662032,
+      "whitespace_words": 91091,
+      "characters": 661831
+    }
+  },
+  "total_metrics": {
+    "documents": 20005,
+    "model_character_tokens": 71297343,
+    "encoded_tokens_with_bos_eos": 71337353,
+    "target_tokens_with_eos": 71317348,
+    "whitespace_words": 9865107,
+    "characters": 71297343
+  },
+  "source_inventory_sha256": "3277924cc229fdc262897ec96198d69e8f9e5999f78e65e24bf4836e23430e97",
+  "prepared_corpus_sha256": "abcdce857d44746e70974af6505e063c6dd4f6828365b599ab2de01660cb7fa2",
+  "prepared_corpus_size_bytes": 72759549,
+  "prepared_corpus_path": "data/indonesian_coherent_corpus/prepared_corpus.json"
+}

@@ -1,0 +1,51 @@
+SHELLA — KORPUS PROSA BAHASA INDONESIA TERKURASI
+
+Hak dataset ini bersifat campuran dan berlaku per dokumen. Lihat sources.json untuk
+pemetaan record_id, sumber, revisi, atribusi, lisensi, dan catatan modifikasi.
+
+1. ARTIKEL WIKIPEDIA BAHASA INDONESIA
+
+Teks artikel diambil dari dump resmi idwiki bertanggal 2026-07-01. Menurut panduan
+lisensi dump Wikimedia dan Terms of Use, teks komunitas pada umumnya tersedia di
+bawah Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0) dan
+GNU Free Documentation License (GFDL); sebagian teks hanya CC BY-SA atau memiliki
+atribusi/lisensi tambahan karena materi impor. Teks yang digunakan di sini telah
+diubah: markup wiki, templat, tabel, referensi, daftar, dan bagian non-prosa dibuang;
+normalisasi teks diterapkan. Perubahan itu dicatat per record di sources.json.
+
+Untuk atribusi, gunakan URL artikel/riwayat yang disimpan untuk setiap record; halaman
+artikel menautkan riwayat kontributor. Pertahankan pemberitahuan sumber impor dan
+syarat atribusi tambahan apabila ada. Saat mendistribusikan teks atau versi turunannya,
+ikuti lisensi yang berlaku pada halaman, sertakan pemberitahuan lisensi dan tautannya,
+nyatakan perubahan, dan penuhi kewajiban share-alike yang berlaku. Jangan menganggap
+setiap halaman dapat dilisensikan ulang di bawah GFDL: sebagian materi impor mungkin
+hanya tersedia di bawah CC BY-SA.
+
+Wikimedia menyatakan dump dapat memuat materi fair-use/pengecualian dan pelanggaran
+hak cipta yang belum terdeteksi. Builder membuang halaman dengan penanda peringatan hak
+cipta yang eksplisit, namun tidak meninjau secara hukum setiap riwayat dan atribusi impor.
+Penggunaan ulang dilakukan dengan risiko pemakai dan membutuhkan pemeriksaan lanjutan
+sebelum distribusi dataset/model.
+
+2. TEKS UNDANG-UNDANG INDONESIA
+
+Lima dokumen undang-undang berasal dari PDF JDIH BPK yang dicatat satu per satu di
+sources.json. Dasar yang digunakan terbatas pada teks peraturan perundang-undangan
+berdasarkan Pasal 42(b) UU Republik Indonesia No. 28 Tahun 2014 tentang Hak Cipta.
+Dasar ini tidak mencakup otomatis tata letak PDF, gambar, komentar, abstrak, atau materi
+pihak ketiga pada situs pemerintah. Atribusi sumber resmi tetap dicatat.
+
+3. STATUS MODEL
+
+Lisensi teks sumber tidak dengan sendirinya menetapkan status hak atau lisensi bobot
+model yang dilatih darinya. Dampak CC BY-SA/GFDL terhadap bobot dan keluaran model
+belum diputuskan dalam korpus ini; lakukan tinjauan hukum tersendiri sebelum distribusi,
+terutama untuk penggunaan komersial.
+
+SUMBER KETENTUAN
+
+- Wikimedia dump licensing: https://dumps.wikimedia.org/legal.html
+- Wikimedia Terms of Use: https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use
+- CC BY-SA 4.0: https://creativecommons.org/licenses/by-sa/4.0/
+- GFDL 1.3: https://www.gnu.org/licenses/fdl-1.3.html
+- UU Hak Cipta No. 28 Tahun 2014 (DJKI): https://www.dgip.go.id/unduhan/download/uu-nomor-28-tahun-2014-tentang-hak-cipta-34-2014

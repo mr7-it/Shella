@@ -1,5 +1,6 @@
 use super::{
-    CorpusManifest, GenerativeError, GenerativeLanguageModel, Result, TrainingReport,
+    CorpusManifest, GenerativeError, GenerativeLanguageModel, HybridTrainingReport, Result,
+    TrainingReport,
     model::{CausalLanguageModel, TransformerConfig},
     tokenizer::CharacterTokenizer,
 };
@@ -13,7 +14,7 @@ use std::{
 };
 
 const MAGIC: &[u8; 8] = b"SHLMLM01";
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 const MAX_CHECKPOINT_BYTES: u64 = 128 * 1024 * 1024;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -26,6 +27,8 @@ struct CheckpointMetadata {
     tokenizer_sha256: String,
     corpus_manifest: Option<CorpusManifest>,
     training_report: Option<TrainingReport>,
+    #[serde(default)]
+    hybrid_training_report: Option<HybridTrainingReport>,
     weights_sha256: String,
     weights_bytes: u64,
 }
@@ -58,6 +61,7 @@ pub(super) fn save(model: &GenerativeLanguageModel, path: &Path) -> Result<Strin
         tokenizer_sha256: sha256_hex(&tokenizer_bytes),
         corpus_manifest: model.corpus_manifest.clone(),
         training_report: model.training_report.clone(),
+        hybrid_training_report: model.hybrid_training_report.clone(),
         weights_sha256,
         weights_bytes: weights.len() as u64,
     };
@@ -123,7 +127,7 @@ pub(super) fn load(path: &Path) -> Result<GenerativeLanguageModel> {
         ));
     }
     let metadata: CheckpointMetadata = serde_json::from_slice(&bytes[24..metadata_end])?;
-    if metadata.format_version != FORMAT_VERSION {
+    if !(1..=FORMAT_VERSION).contains(&metadata.format_version) {
         return Err(GenerativeError::Checkpoint(format!(
             "versi format {} tidak didukung",
             metadata.format_version
@@ -155,18 +159,23 @@ pub(super) fn load(path: &Path) -> Result<GenerativeLanguageModel> {
         metadata.config.clone(),
         metadata.tokenizer.vocabulary_size(),
     )?;
-    load_weights(&mut backend, weights)?;
+    load_weights(&mut backend, weights, metadata.format_version == 1)?;
     let checkpoint_sha256 = sha256_hex(&bytes);
     Ok(GenerativeLanguageModel {
         tokenizer: metadata.tokenizer,
         backend,
         corpus_manifest: metadata.corpus_manifest,
         training_report: metadata.training_report,
+        hybrid_training_report: metadata.hybrid_training_report,
         checkpoint_sha256: Some(checkpoint_sha256),
     })
 }
 
-fn load_weights(backend: &mut CausalLanguageModel, weights: &[u8]) -> Result<()> {
+fn load_weights(
+    backend: &mut CausalLanguageModel,
+    weights: &[u8],
+    allow_missing_lif_head: bool,
+) -> Result<()> {
     let temporary_directory = create_private_temp_directory()?;
     let weights_path = temporary_directory.join("weights.safetensors");
     let result = (|| {
@@ -188,7 +197,29 @@ fn load_weights(backend: &mut CausalLanguageModel, weights: &[u8]) -> Result<()>
             kind: error.kind(),
         })?;
         drop(file);
-        backend.variables.load(&weights_path)?;
+        if allow_missing_lif_head {
+            let tensors = candle_core::safetensors::SliceSafetensors::new(weights)?;
+            let tensor_names = tensors
+                .tensors()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect::<std::collections::BTreeSet<_>>();
+            let variables = backend.variables.data().lock().map_err(|_| {
+                GenerativeError::Checkpoint("lock VarMap rusak saat migrasi checkpoint".to_owned())
+            })?;
+            for (name, variable) in variables.iter() {
+                if tensor_names.contains(name) {
+                    let value = tensors.load(name, variable.device())?;
+                    variable.set(&value)?;
+                } else if !name.starts_with("lif_head.") {
+                    return Err(GenerativeError::Checkpoint(format!(
+                        "checkpoint lama kehilangan tensor Transformer {name}"
+                    )));
+                }
+            }
+        } else {
+            backend.variables.load(&weights_path)?;
+        }
         Ok(())
     })();
     let _ = fs::remove_dir_all(&temporary_directory);
@@ -237,8 +268,9 @@ fn sha256_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::language::generative::{
-        CharacterTokenizer, ComputeDevice, GenerationConfig, GenerativeLanguageModel,
-        TransformerConfig,
+        CharacterTokenizer, ComputeDevice, FeedbackAuthority, GenerationConfig,
+        GenerativeLanguageModel, HybridAction, HybridTrainingConfig, TransformerConfig,
+        VerifiedActionExample,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -312,6 +344,39 @@ mod tests {
         bytes[last] ^= 0x5a;
         fs::write(&path, bytes).unwrap();
         assert!(GenerativeLanguageModel::load_checkpoint(&path).is_err());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn checkpoint_round_trip_restores_joint_lif_training_and_report() {
+        let path = unique_path();
+        let mut original = model();
+        original
+            .train_on_verified_feedback(
+                &[VerifiedActionExample {
+                    source_id: "review-001".to_owned(),
+                    prompt: "halo dunia.".to_owned(),
+                    candidate_response: Some("halo dunia.".to_owned()),
+                    target_response: Some("halo dunia.".to_owned()),
+                    expected_action: HybridAction::Answer,
+                    authority: FeedbackAuthority::HumanConfirmed,
+                }],
+                HybridTrainingConfig::default(),
+            )
+            .unwrap();
+        let prediction = original.predict_hybrid_action("halo dunia.").unwrap();
+        let fingerprint = original.save_checkpoint(&path).unwrap();
+        let restored = GenerativeLanguageModel::load_checkpoint(&path).unwrap();
+        assert!(restored.has_trained_hybrid_head());
+        assert_eq!(
+            original.hybrid_training_report(),
+            restored.hybrid_training_report()
+        );
+        assert_eq!(
+            prediction,
+            restored.predict_hybrid_action("halo dunia.").unwrap()
+        );
+        assert_eq!(restored.checkpoint_sha256(), Some(fingerprint.as_str()));
         fs::remove_file(path).unwrap();
     }
 }

@@ -1,13 +1,20 @@
 mod checkpoint;
 mod dataset;
+mod feedback;
 mod generation;
+mod lif_head;
 mod model;
+mod surrogate;
 mod tokenizer;
 mod training;
 
 pub use dataset::{
     CorpusManifest, CorpusRecord, CorpusSourceManifest, CorpusSplit, DatasetSplitConfig,
     SplitManifest,
+};
+pub use feedback::{
+    FeedbackAuthority, FeedbackAuthorityCounts, HybridAction, HybridActionPrediction,
+    HybridLearningOutcome, HybridTrainingConfig, HybridTrainingReport, VerifiedActionExample,
 };
 pub use generation::{
     GeneratedText, GenerationConfig, GenerationRepetitionMetrics, GenerationStrategy,
@@ -111,6 +118,7 @@ pub struct GenerativeLanguageModel {
     pub(crate) backend: model::CausalLanguageModel,
     pub(crate) corpus_manifest: Option<CorpusManifest>,
     pub(crate) training_report: Option<TrainingReport>,
+    pub(crate) hybrid_training_report: Option<HybridTrainingReport>,
     pub(crate) checkpoint_sha256: Option<String>,
 }
 
@@ -123,6 +131,7 @@ impl GenerativeLanguageModel {
             backend,
             corpus_manifest: None,
             training_report: None,
+            hybrid_training_report: None,
             checkpoint_sha256: None,
         })
     }
@@ -153,6 +162,15 @@ impl GenerativeLanguageModel {
         self.training_report.as_ref()
     }
 
+    pub fn hybrid_training_report(&self) -> Option<&HybridTrainingReport> {
+        self.hybrid_training_report.as_ref()
+    }
+
+    #[must_use]
+    pub fn has_trained_hybrid_head(&self) -> bool {
+        self.hybrid_training_report.is_some()
+    }
+
     pub fn parameter_count(&self) -> usize {
         self.backend
             .variables()
@@ -169,6 +187,66 @@ impl GenerativeLanguageModel {
         let report = training::train_model(self, corpus, config)?;
         self.training_report = Some(report.clone());
         Ok(report)
+    }
+
+    /// Trains the Transformer and its recurrent LIF action head together using explicitly
+    /// authorized feedback. The feedback text also contributes next-character loss.
+    pub fn train_on_verified_feedback(
+        &mut self,
+        examples: &[VerifiedActionExample],
+        config: HybridTrainingConfig,
+    ) -> Result<HybridTrainingReport> {
+        let report = training::train_on_verified_feedback(self, examples, config)?;
+        self.hybrid_training_report = Some(report.clone());
+        Ok(report)
+    }
+
+    /// Predicts answer/revise/abstain from the Transformer representation through the LIF head.
+    /// Before labeled feedback training, the prediction is untrained and must not gate answers.
+    pub fn predict_hybrid_action(&self, text: &str) -> Result<HybridActionPrediction> {
+        if text.trim().is_empty() {
+            return Err(GenerativeError::InvalidInput {
+                parameter: "action_text",
+                reason: "harus memuat teks nonkosong",
+            });
+        }
+        let mut ids = self.tokenizer.encode_prompt(text)?;
+        let context = self.config().max_context;
+        if ids.len() > context {
+            ids.truncate(context);
+        }
+        let input =
+            candle_core::Tensor::from_vec(ids.clone(), (1, ids.len()), &candle_core::Device::Cpu)?;
+        let logits = self.backend.action_logits(&input)?.to_vec2::<f32>()?;
+        let row = logits.first().ok_or(GenerativeError::InvalidInput {
+            parameter: "action_logits",
+            reason: "head LIF tidak mengembalikan baris prediksi",
+        })?;
+        if row.len() != 3 || row.iter().any(|value| !value.is_finite()) {
+            return Err(GenerativeError::Numerical {
+                operation: "prediksi aksi hibrida",
+            });
+        }
+        let maximum = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let exponentials = [row[0], row[1], row[2]].map(|value| (value - maximum).exp());
+        let denominator = exponentials.iter().sum::<f32>();
+        let probabilities = exponentials.map(|value| value / denominator);
+        let best = probabilities
+            .iter()
+            .enumerate()
+            .max_by(|left, right| left.1.total_cmp(right.1))
+            .map(|(index, _)| index)
+            .unwrap_or(2);
+        let action =
+            feedback::HybridAction::from_index(best).ok_or(GenerativeError::InvalidInput {
+                parameter: "action_logits",
+                reason: "indeks aksi berada di luar kelas yang didukung",
+            })?;
+        Ok(HybridActionPrediction {
+            action,
+            logits: [row[0], row[1], row[2]],
+            probabilities,
+        })
     }
 
     pub fn evaluate(

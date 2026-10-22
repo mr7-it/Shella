@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "collection_id": "shella-id-public-laws",
+  "collection_title": "Subkorpus awal teks undang-undang Indonesia",
+  "snapshot_date": "2026-10-22",
+  "language": "id",
+  "rights_basis": "Teks peraturan perundang-undangan tidak memiliki Hak Cipta berdasarkan UU Republik Indonesia Nomor 28 Tahun 2014 Pasal 42(b). Korpus hanya mengambil teks undang-undang, bukan abstrak, komentar, atau metadata pihak ketiga.",
+  "rights_source_url": "https://www.dgip.go.id/unduhan/download/uu-nomor-28-tahun-2014-tentang-hak-cipta-34-2014",
+  "documents": [
+    {
+      "document_id": "uu-no-28-tahun-2014",
+      "family_id": "uu-no-28-tahun-2014",
+      "title": "Undang-Undang Nomor 28 Tahun 2014 tentang Hak Cipta",
+      "year": 2014,
+      "subject": "Hak Kekayaan Intelektual",
+      "status_at_source": "Berlaku",
+      "detail_url": "https://peraturan.bpk.go.id/Details/38690/uu-no-28-tahun-2014",
+      "download_url": "https://peraturan.bpk.go.id/Download/28018/UU%20Nomor%2028%20Tahun%202014.pdf",
+      "file": "raw/uu-28-2014.pdf",
+      "sha256": "9cf639f03483da6446be0e08954b0564f0f267f1719dc6f3a273b50512cbc002"
+    },
+    {
+      "document_id": "uu-no-14-tahun-2008",
+      "family_id": "uu-no-14-tahun-2008",
+      "title": "Undang-Undang Nomor 14 Tahun 2008 tentang Keterbukaan Informasi Publik",
+      "year": 2008,
+      "subject": "Informasi Publik dan Pelayanan Publik",
+      "status_at_source": "Berlaku",
+      "detail_url": "https://peraturan.bpk.go.id/Details/39047/uu-no-14-tahun-2008",
+      "download_url": "https://peraturan.bpk.go.id/Download/28425/UU%20Nomor%2014%20Tahun%202008.pdf",
+      "file": "raw/uu-no-14-tahun-2008.pdf",
+      "sha256": "1265f6ec0dba866732982fe5036f88836967fd87cc346a2e53f75d39f12fd717"
+    },
+    {
+      "document_id": "uu-no-18-tahun-2008",
+      "family_id": "uu-no-18-tahun-2008",
+      "title": "Undang-Undang Nomor 18 Tahun 2008 tentang Pengelolaan Sampah",
+      "year": 2008,
+      "subject": "Lingkungan dan Pengelolaan Sampah",
+      "status_at_source": "Berlaku",
+      "detail_url": "https://peraturan.bpk.go.id/Details/39067/uu-no-18-tahun-2008",
+      "download_url": "https://peraturan.bpk.go.id/Download/28462/UU%20Nomor%2018%20Tahun%202008.pdf",
+      "file": "raw/uu-no-18-tahun-2008.pdf",
+      "sha256": "dc7735db65d6dedc650ff78c36b6c6f076cf931861b005edab03f30e513026f4"
+    },
+    {
+      "document_id": "uu-no-20-tahun-2003",
+      "family_id": "uu-no-20-tahun-2003",
+      "title": "Undang-Undang Nomor 20 Tahun 2003 tentang Sistem Pendidikan Nasional",
+      "year": 2003,
+      "subject": "Pendidikan",
+      "status_at_source": "Berlaku dengan pencabutan sebagian sebagaimana metadata JDIH BPK",
+      "detail_url": "https://peraturan.bpk.go.id/Details/43920/uu-no-20-tahun-2003",
+      "download_url": "https://peraturan.bpk.go.id/Download/32160/UU%20Nomor%2020%20Tahun%202003.pdf",
+      "file": "raw/uu-no-20-tahun-2003.pdf",
+      "sha256": "6f83d227e9316109c8c99c2fcd107b5d6d4338f36a414dfa55dcb5054c806b09"
+    },
+    {
+      "document_id": "uu-no-12-tahun-2012",
+      "family_id": "uu-no-12-tahun-2012",
+      "title": "Undang-Undang Nomor 12 Tahun 2012 tentang Pendidikan Tinggi",
+      "year": 2012,
+      "subject": "Pendidikan Tinggi",
+      "status_at_source": "Berlaku",
+      "detail_url": "https://peraturan.bpk.go.id/Details/39063/uu-no-12-tahun-2012",
+      "download_url": "https://peraturan.bpk.go.id/Download/28456/UU%20Nomor%2012%20Tahun%202012.pdf",
+      "file": "raw/uu-no-12-tahun-2012.pdf",
+      "sha256": "f74efc4c9b1b0e8795880a323f19107d0eb6ccdb271eca952744cbc60aa00dec"
+    }
+  ]
+}

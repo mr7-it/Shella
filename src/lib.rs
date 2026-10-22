@@ -60,9 +60,11 @@ pub use knowledge::{
 };
 pub use language::generative::{
     CharacterTokenizer, ComputeDevice, CorpusManifest, CorpusRecord, CorpusSourceManifest,
-    CorpusSplit, DatasetSplitConfig, EpochMetrics, EvaluationMetrics, GeneratedText,
-    GenerationConfig, GenerationRepetitionMetrics, GenerationStrategy, GenerativeError,
-    GenerativeLanguageModel, SplitManifest, TrainingConfig, TrainingReport, TransformerConfig,
+    CorpusSplit, DatasetSplitConfig, EpochMetrics, EvaluationMetrics, FeedbackAuthority,
+    FeedbackAuthorityCounts, GeneratedText, GenerationConfig, GenerationRepetitionMetrics,
+    GenerationStrategy, GenerativeError, GenerativeLanguageModel, HybridAction,
+    HybridActionPrediction, HybridLearningOutcome, HybridTrainingConfig, HybridTrainingReport,
+    SplitManifest, TrainingConfig, TrainingReport, TransformerConfig, VerifiedActionExample,
 };
 pub use language::{
     AssertionStatus, ConceptRelation, ContextResolution, DatasetEncoding, DatasetFileFormat,
@@ -95,6 +97,9 @@ pub use reasoning::{
 };
 pub use runtime::{LifRuntime, SimulationClock};
 pub use sdk::{
-    Engine, Input as SdkInput, InputKind as SdkInputKind, MemoryConditionedGeneration,
-    MemoryGenerationError, MemoryGenerationStatus, Output as SdkOutput, Session as SdkSession,
+    AnswerAbstentionReason, AnswerActionMap, AnswerDraftReview, DraftVerification, Engine,
+    HybridLearningError, Input as SdkInput, InputKind as SdkInputKind, LifAnswerTrace,
+    MemoryConditionedGeneration, MemoryGenerationError, MemoryGenerationStatus,
+    Output as SdkOutput, Session as SdkSession, VerifiedAnswer, VerifiedAnswerError,
+    VerifiedAnswerStatus,
 };

@@ -457,3 +457,8 @@ Training hanya memakai NusaX-Senti train resmi yang dibagi internal train/valida
 validation dipakai selama training dan test dievaluasi setelah training selesai. `metrics`
 hanya mengukur pengulangan permukaan dari berkas hasil generasi dan tidak menilai
 koherensi atau kebenaran bahasa.
+
+
+## Feedback terverifikasi untuk head LIF–Transformer
+
+`VerifiedActionExample`, `HybridAction`, `FeedbackAuthority`, dan `HybridTrainingConfig` dipakai melalui `GenerativeLanguageModel::train_on_verified_feedback` atau `Session::learn_from_verified_feedback`. Objective gabungan mengupdate decoder Transformer dan head recurrent LIF dengan next-character loss serta label aksi (`Answer`, `Revise`, `Abstain`). SDK menyimpan checkpoint model dan—jika `LearningMemory` dipasang pada Engine—record fitur pengalaman. Training hanya berjalan setelah aplikasi mengirim label dari manusia/evaluator tepercaya; interaksi biasa tidak melatih model otomatis. Lihat [panduan pembelajaran hybrid online](PEMBELAJARAN_HIBRIDA_ONLINE.md) untuk contoh, kontrak feedback, dan batas optimizer/autograd.

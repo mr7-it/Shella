@@ -1,7 +1,8 @@
 use super::{Engine, Input, Output};
 use crate::{
-    GeneratedText, GenerationConfig, GenerativeError, GenerativeLanguageModel, LanguageNetwork,
-    ReasoningEngine, ReasoningResult, SemanticLearningOutcome, SimError,
+    GeneratedText, GenerationConfig, GenerativeError, GenerativeLanguageModel,
+    HybridLearningOutcome, HybridTrainingConfig, LanguageNetwork, ReasoningEngine, ReasoningResult,
+    SemanticLearningOutcome, SimError, TextEmbedding, VerifiedActionExample,
     decision::{Candidate, Decision},
     evaluator::{RewardEvaluation, RewardEvaluator},
     language::SemanticResponse,
@@ -55,6 +56,27 @@ impl fmt::Display for MemoryGenerationError {
 
 impl std::error::Error for MemoryGenerationError {}
 
+#[derive(Debug)]
+pub enum HybridLearningError {
+    Generative(GenerativeError),
+    LearningMemory(SimError),
+}
+
+impl fmt::Display for HybridLearningError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Generative(error) => {
+                write!(formatter, "joint Transformer-LIF training gagal: {error}")
+            }
+            Self::LearningMemory(error) => {
+                write!(formatter, "pencatatan LearningMemory gagal: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for HybridLearningError {}
+
 impl From<SimError> for MemoryGenerationError {
     fn from(error: SimError) -> Self {
         Self::SemanticMemory(error)
@@ -72,6 +94,56 @@ pub struct Session<'a> {
     pub(crate) engine: &'a mut Engine,
 }
 impl Session<'_> {
+    /// Applies reviewed interaction feedback to the Transformer and differentiable LIF head,
+    /// then atomically persists the updated model checkpoint. Feedback must be human-confirmed
+    /// or produced by a trusted evaluator; generated text is never treated as its own label.
+    pub fn learn_from_verified_feedback(
+        &mut self,
+        model: &mut GenerativeLanguageModel,
+        examples: &[VerifiedActionExample],
+        config: HybridTrainingConfig,
+        checkpoint_path: impl AsRef<Path>,
+    ) -> Result<HybridLearningOutcome, HybridLearningError> {
+        let training = model
+            .train_on_verified_feedback(examples, config)
+            .map_err(HybridLearningError::Generative)?;
+        let mut learning_memory_record_ids = Vec::new();
+        if let Some(memory) = self.engine.learning_memory.as_mut() {
+            for example in examples {
+                let mut context = example.prompt.clone();
+                if let Some(candidate) = &example.candidate_response {
+                    context.push_str(" calon jawaban ");
+                    context.push_str(candidate);
+                }
+                let embedding = TextEmbedding::from_text(&context, 256)
+                    .map_err(HybridLearningError::LearningMemory)?;
+                let features = embedding
+                    .values()
+                    .iter()
+                    .map(|value| f64::from(*value))
+                    .collect::<Vec<_>>();
+                let write = memory
+                    .record_with_feedback(
+                        "hybrid-feedback",
+                        &features,
+                        Some(example.expected_action.index() as usize),
+                        1.0,
+                        1.0,
+                    )
+                    .map_err(HybridLearningError::LearningMemory)?;
+                learning_memory_record_ids.push(write.record_id().to_owned());
+            }
+        }
+        let checkpoint_sha256 = model
+            .save_checkpoint(checkpoint_path)
+            .map_err(HybridLearningError::Generative)?;
+        Ok(HybridLearningOutcome {
+            training,
+            learning_memory_record_ids,
+            checkpoint_sha256,
+        })
+    }
+
     /// Menghasilkan kelanjutan neural dari model decoder yang diberikan pemanggil.
     /// Jalur ini tidak memakai SemanticMemory dan hasilnya tidak terverifikasi faktual.
     pub fn generate_text(

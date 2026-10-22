@@ -1,0 +1,128 @@
+{
+  "collection_id": "shella-id-public-laws",
+  "snapshot_date": "2026-10-22",
+  "rights_basis": "Teks peraturan perundang-undangan tidak memiliki Hak Cipta berdasarkan UU Republik Indonesia Nomor 28 Tahun 2014 Pasal 42(b). Korpus hanya mengambil teks undang-undang, bukan abstrak, komentar, atau metadata pihak ketiga.",
+  "token_definition": "Shella CharacterTokenizer: one Unicode code point after NFC/lowercase/whitespace normalization; model_character_tokens excludes BOS/EOS; encoded_tokens_with_bos_eos includes both for every document.",
+  "source_documents": [
+    {
+      "document_id": "uu-no-28-tahun-2014",
+      "title": "Undang-Undang Nomor 28 Tahun 2014 tentang Hak Cipta",
+      "detail_url": "https://peraturan.bpk.go.id/Details/38690/uu-no-28-tahun-2014",
+      "download_url": "https://peraturan.bpk.go.id/Download/28018/UU%20Nomor%2028%20Tahun%202014.pdf",
+      "pdf_sha256": "9cf639f03483da6446be0e08954b0564f0f267f1719dc6f3a273b50512cbc002",
+      "pdf_size_bytes": 2563763,
+      "pages": 84,
+      "extracted_text_path": "data/indonesian_legal_corpus/extracted/uu-no-28-tahun-2014.txt",
+      "characters_after_cleaning": 111153,
+      "whitespace_words": 15448,
+      "alphabetic_ratio_in_alphanumeric": 0.981028,
+      "status_at_source": "Berlaku",
+      "subject": "Hak Kekayaan Intelektual"
+    },
+    {
+      "document_id": "uu-no-14-tahun-2008",
+      "title": "Undang-Undang Nomor 14 Tahun 2008 tentang Keterbukaan Informasi Publik",
+      "detail_url": "https://peraturan.bpk.go.id/Details/39047/uu-no-14-tahun-2008",
+      "download_url": "https://peraturan.bpk.go.id/Download/28425/UU%20Nomor%2014%20Tahun%202008.pdf",
+      "pdf_sha256": "1265f6ec0dba866732982fe5036f88836967fd87cc346a2e53f75d39f12fd717",
+      "pdf_size_bytes": 183905,
+      "pages": 53,
+      "extracted_text_path": "data/indonesian_legal_corpus/extracted/uu-no-14-tahun-2008.txt",
+      "characters_after_cleaning": 66671,
+      "whitespace_words": 8883,
+      "alphabetic_ratio_in_alphanumeric": 0.986027,
+      "status_at_source": "Berlaku",
+      "subject": "Informasi Publik dan Pelayanan Publik"
+    },
+    {
+      "document_id": "uu-no-18-tahun-2008",
+      "title": "Undang-Undang Nomor 18 Tahun 2008 tentang Pengelolaan Sampah",
+      "detail_url": "https://peraturan.bpk.go.id/Details/39067/uu-no-18-tahun-2008",
+      "download_url": "https://peraturan.bpk.go.id/Download/28462/UU%20Nomor%2018%20Tahun%202008.pdf",
+      "pdf_sha256": "dc7735db65d6dedc650ff78c36b6c6f076cf931861b005edab03f30e513026f4",
+      "pdf_size_bytes": 152069,
+      "pages": 37,
+      "extracted_text_path": "data/indonesian_legal_corpus/extracted/uu-no-18-tahun-2008.txt",
+      "characters_after_cleaning": 43060,
+      "whitespace_words": 5766,
+      "alphabetic_ratio_in_alphanumeric": 0.982291,
+      "status_at_source": "Berlaku",
+      "subject": "Lingkungan dan Pengelolaan Sampah"
+    },
+    {
+      "document_id": "uu-no-20-tahun-2003",
+      "title": "Undang-Undang Nomor 20 Tahun 2003 tentang Sistem Pendidikan Nasional",
+      "detail_url": "https://peraturan.bpk.go.id/Details/43920/uu-no-20-tahun-2003",
+      "download_url": "https://peraturan.bpk.go.id/Download/32160/UU%20Nomor%2020%20Tahun%202003.pdf",
+      "pdf_sha256": "6f83d227e9316109c8c99c2fcd107b5d6d4338f36a414dfa55dcb5054c806b09",
+      "pdf_size_bytes": 146955,
+      "pages": 57,
+      "extracted_text_path": "data/indonesian_legal_corpus/extracted/uu-no-20-tahun-2003.txt",
+      "characters_after_cleaning": 70868,
+      "whitespace_words": 9298,
+      "alphabetic_ratio_in_alphanumeric": 0.980811,
+      "status_at_source": "Berlaku dengan pencabutan sebagian sebagaimana metadata JDIH BPK",
+      "subject": "Pendidikan"
+    },
+    {
+      "document_id": "uu-no-12-tahun-2012",
+      "title": "Undang-Undang Nomor 12 Tahun 2012 tentang Pendidikan Tinggi",
+      "detail_url": "https://peraturan.bpk.go.id/Details/39063/uu-no-12-tahun-2012",
+      "download_url": "https://peraturan.bpk.go.id/Download/28456/UU%20Nomor%2012%20Tahun%202012.pdf",
+      "pdf_sha256": "f74efc4c9b1b0e8795880a323f19107d0eb6ccdb271eca952744cbc60aa00dec",
+      "pdf_size_bytes": 329988,
+      "pages": 97,
+      "extracted_text_path": "data/indonesian_legal_corpus/extracted/uu-no-12-tahun-2012.txt",
+      "characters_after_cleaning": 100598,
+      "whitespace_words": 13208,
+      "alphabetic_ratio_in_alphanumeric": 0.983919,
+      "status_at_source": "Berlaku",
+      "subject": "Pendidikan Tinggi"
+    }
+  ],
+  "documents_before_deduplication": 5,
+  "documents_after_deduplication": 5,
+  "exact_duplicates_removed": 0,
+  "near_duplicates_removed": 0,
+  "split_counts_by_documents": {
+    "training": 3,
+    "validation": 1,
+    "test": 1
+  },
+  "split_metrics": {
+    "training": {
+      "documents": 3,
+      "model_character_tokens": 180599,
+      "encoded_tokens_with_bos_eos": 180605,
+      "target_tokens_with_eos": 180602,
+      "whitespace_words": 23947,
+      "characters": 180599
+    },
+    "validation": {
+      "documents": 1,
+      "model_character_tokens": 111153,
+      "encoded_tokens_with_bos_eos": 111155,
+      "target_tokens_with_eos": 111154,
+      "whitespace_words": 15448,
+      "characters": 111153
+    },
+    "test": {
+      "documents": 1,
+      "model_character_tokens": 100598,
+      "encoded_tokens_with_bos_eos": 100600,
+      "target_tokens_with_eos": 100599,
+      "whitespace_words": 13208,
+      "characters": 100598
+    }
+  },
+  "total_metrics": {
+    "documents": 5,
+    "model_character_tokens": 392350,
+    "encoded_tokens_with_bos_eos": 392360,
+    "target_tokens_with_eos": 392355,
+    "whitespace_words": 52603,
+    "characters": 392350
+  },
+  "prepared_corpus_sha256": "9636c4fd918fbedd3cbc1a477a94125ac55d9f61c4babd82addc964c9954a249",
+  "prepared_corpus_path": "data/indonesian_legal_corpus/prepared_corpus.json"
+}
