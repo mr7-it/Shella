@@ -8,4 +8,6 @@ mod session;
 pub use engine::Engine;
 pub use input::{Input, InputKind};
 pub use output::Output;
-pub use session::Session;
+pub use session::{
+    MemoryConditionedGeneration, MemoryGenerationError, MemoryGenerationStatus, Session,
+};

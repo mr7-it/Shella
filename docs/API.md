@@ -278,9 +278,10 @@ konflik tidak memperbarui readout/STDP atau menulis pengalaman learning.
 
 `GenerativeLanguageModel` menggunakan decoder-only Transformer Candle 0.8.4,
 tokenizer karakter Unicode, dan CPU. Tokenizer hanya di-fit pada train split
-NusaX-Senti Indonesia; model tidak memakai `WordID` maupun membaca `SemanticMemory`
-saat menghasilkan teks. `Session::generate_text` mendelegasi ke model yang caller
-berikan secara eksplisit:
+NusaX-Senti Indonesia dan model tidak memakai `WordID` sebagai token neural.
+`Session::generate_text` mendelegasi ke model yang caller berikan tanpa membaca
+`SemanticMemory`; method baru `generate_text_with_semantic_memory` di bagian bawah
+menyisipkan recall sebagai teks context, tetapi tidak memverifikasi klaim:
 
 ```rust
 let model = GenerativeLanguageModel::load_checkpoint("shella-nusax.sllm")?;
@@ -390,3 +391,69 @@ Runner M11 memakai `LearningMemory::record_feedback`, `recall_similar`, `infer_t
 ## Perbaikan M11
 
 `LifNetwork::apply_rewarded_readout` melakukan bounded signed update pada sinaps readout aktual dan melengkapi eligibility reward-modulated STDP. `LearningMemory::record_prototype` dan `load_prototypes` menyimpan serta memulihkan prototype neural terkonsolidasi. `LearningMemory::discard_task` menjadi rollback untuk feedback task yang tidak meningkatkan validation. Runner memakai prototype yang fit dari train saja, bukan test atau retrieval eksternal.
+
+
+## Generasi neural dan SemanticMemory
+
+API kompatibel `Session::generate_text(&model, prompt, config)` tetap menghasilkan
+kelanjutan autoregresif tanpa retrieval. Untuk memasukkan memory secara aktual, pasang
+`SemanticMemory` yang sudah ada pada `Engine`, lalu panggil method tambahan:
+
+```rust
+use shella::{
+    GenerationConfig, GenerativeLanguageModel, MemoryGenerationStatus,
+};
+
+let result = engine.session().generate_text_with_semantic_memory(
+    &model,
+    "kucing makan apa?",
+    Some("pet-care"),
+    4,
+    GenerationConfig {
+        max_new_tokens: 32,
+        temperature: 0.0,
+        top_k: None,
+        top_p: None,
+        seed: 7,
+    },
+)?;
+if result.status == MemoryGenerationStatus::Generated {
+    let generated = result.generated.as_ref().expect("status generated");
+    println!("{}", generated.continuation);
+}
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+Method baru membaca `SemanticMemory` dari Engine yang sama; ia tidak membuat salinan
+lexicon atau memory. `context_id` dapat `None` untuk retrieval lintas konteks.
+`retrieval_limit` maksimum 32. Hasil `MemoryConditionedGeneration` menyediakan
+`retrieved_memory` dan `included_memory` secara terpisah supaya pemanggil dapat melihat
+recall mana yang benar-benar masuk ke prompt. Status `NoRelevantMemory` dan
+`EvidenceOutsideContextWindow` menahan generasi (`generated == None`). Output yang
+terjadi tetap `unverified`; memory disisipkan sebagai konteks teks, bukan verifikasi
+entailment, provenance klaim, atau instruction tuning. Untuk jawaban faktual konservatif
+gunakan `SemanticMemory::respond_in_context` / `Session::respond_with_reasoning`.
+
+`GeneratedText::repetition_metrics()` mengembalikan diagnostik token-karakter:
+rasio karakter unik, repeated bigram/trigram/4-gram, adjacent-repeat rate, apakah EOS
+menghentikan output, serta apakah prompt dipotong. Ini bukan metrik koherensi/factuality.
+Decoding menghindari karakter 4-gram yang pernah muncul pada kelanjutan bila tersedia
+alternatif; ia tidak mengubah bobot atau schema checkpoint.
+
+CLI:
+
+```sh
+cargo run --locked --bin shella-lm -- train \
+  --dataset data/language/nusax/sentiment/indonesian/train.csv \
+  --checkpoint target/model-baru.sllm --context 128
+cargo run --locked --bin shella-lm -- evaluate --checkpoint target/model-baru.sllm
+cargo run --locked --bin shella-lm -- generate \
+  --checkpoint target/model-baru.sllm --prompt "Bagaimana cara merawat tanaman di rumah?" \
+  --temperature 0 --max-new-tokens 80
+cargo run --locked --bin shella-lm -- metrics --input-json target/hasil-generate.json
+```
+
+Training hanya memakai NusaX-Senti train resmi yang dibagi internal train/validation/test;
+validation dipakai selama training dan test dievaluasi setelah training selesai. `metrics`
+hanya mengukur pengulangan permukaan dari berkas hasil generasi dan tidak menilai
+koherensi atau kebenaran bahasa.

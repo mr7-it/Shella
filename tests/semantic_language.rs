@@ -1,16 +1,18 @@
 use serde_json::json;
 use shella::{
-    AssertionStatus, ConceptRelation, DatasetId, Engine, GroupedSemanticExample,
-    IndonesianVocabulary, LearningMemory, LexicalAnalysis, LexiconEntryInput, LexiconMetadata,
-    LicenseRegistry, LifConfig, LifNetwork, LinguisticMetadata, MemoryStore, PhraseKind,
+    AssertionStatus, CharacterTokenizer, ComputeDevice, ConceptRelation, DatasetId, Engine,
+    GenerationConfig, GenerativeLanguageModel, GroupedSemanticExample, IndonesianVocabulary,
+    LearningMemory, LexicalAnalysis, LexiconEntryInput, LexiconMetadata, LicenseRegistry,
+    LifConfig, LifNetwork, LinguisticMetadata, MemoryGenerationStatus, MemoryStore, PhraseKind,
     ReasoningConfig, ReasoningEngine, SemanticAnswerEvidence, SemanticConfidenceBand,
     SemanticEvidence, SemanticExample, SemanticGapReport, SemanticMemory, SemanticQuestionIntent,
-    SemanticRelationKind, SemanticRoleKind, SourceProvenance, Synapse,
+    SemanticRelationKind, SemanticRoleKind, SourceProvenance, Synapse, TransformerConfig,
 };
 use std::{
     collections::BTreeMap,
     fs,
     path::PathBuf,
+    process::Command,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -1511,4 +1513,224 @@ fn benchmark_polaritas_100_test_group_held_out_membandingkan_baseline_dan_feedba
     cleanup(&semantic_path);
     cleanup(&baseline_learning_path);
     cleanup(&training_learning_path);
+}
+
+fn semantic_generation_fixture_model() -> GenerativeLanguageModel {
+    let tokenizer = CharacterTokenizer::fit([
+        "catatan pertanyaan jawaban kucing makan nasi apa",
+        "kucing makan nasi",
+    ])
+    .expect("tokenizer fixture");
+    GenerativeLanguageModel::new(
+        TransformerConfig {
+            hidden_size: 8,
+            layer_count: 1,
+            head_count: 2,
+            max_context: 128,
+            seed: 91,
+            device: ComputeDevice::Cpu,
+        },
+        tokenizer,
+    )
+    .expect("model Candle")
+}
+
+fn run_semantic_generation_after_restart(
+    semantic_path: &std::path::Path,
+    model_path: &std::path::Path,
+) -> shella::MemoryConditionedGeneration {
+    let semantic =
+        SemanticMemory::open(semantic_path, lexicon()).expect("semantic memory dipulihkan");
+    let network = LifNetwork::new(LifConfig::new(1.0, 10.0, 1.0, -65.0, -70.0, -60.0, 1), 1)
+        .expect("network SDK");
+    let mut engine = Engine::new(network).with_semantic_memory(semantic);
+    let model =
+        GenerativeLanguageModel::load_checkpoint(model_path).expect("checkpoint LM dipulihkan");
+    engine
+        .session()
+        .generate_text_with_semantic_memory(
+            &model,
+            "kucing makan apa?",
+            Some("pet-care"),
+            4,
+            GenerationConfig {
+                max_new_tokens: 8,
+                temperature: 0.0,
+                top_k: None,
+                top_p: None,
+                seed: 17,
+            },
+        )
+        .expect("generasi memakai recall setelah restart")
+}
+
+#[test]
+fn semantic_memory_conditioned_generation_survives_process_restart() {
+    if let (Ok(semantic_path), Ok(model_path)) = (
+        std::env::var("SHELLA_SEMANTIC_GENERATION_RESTART_STORE"),
+        std::env::var("SHELLA_SEMANTIC_GENERATION_RESTART_MODEL"),
+    ) {
+        let result = run_semantic_generation_after_restart(
+            PathBuf::from(semantic_path).as_path(),
+            PathBuf::from(model_path).as_path(),
+        );
+        println!(
+            "SEMANTIC_GENERATION_RESTART={}",
+            serde_json::to_string(&result).expect("serialisasi hasil child")
+        );
+        return;
+    }
+
+    let semantic_path = memory_path();
+    let external_model_path = std::env::var_os("SHELLA_GENERATIVE_CHECKPOINT");
+    let owns_model_checkpoint = external_model_path.is_none();
+    let model_path = external_model_path.map_or_else(memory_path, PathBuf::from);
+    {
+        let mut semantic =
+            SemanticMemory::open(&semantic_path, lexicon()).expect("semantic memory");
+        semantic
+            .analyze_in_context("pet-care", "kucing makan nasi")
+            .expect("fakta konteks dicatat");
+    }
+    if owns_model_checkpoint {
+        let mut model = semantic_generation_fixture_model();
+        model
+            .save_checkpoint(&model_path)
+            .expect("checkpoint disimpan");
+        drop(model);
+    }
+
+    let before_restart = run_semantic_generation_after_restart(&semantic_path, &model_path);
+    assert_eq!(before_restart.status, MemoryGenerationStatus::Generated);
+    assert_eq!(before_restart.retrieved_memory.len(), 1);
+    assert_eq!(before_restart.included_memory.len(), 1);
+    println!(
+        "SEMANTIC_MEMORY_RECALL={:?}",
+        before_restart.retrieved_memory
+    );
+    let generated = before_restart.generated.as_ref().expect("kelanjutan LM");
+    assert!(generated.prompt.contains("kucing makan nasi"));
+    assert!(!generated.prompt_truncated);
+    assert!(
+        generated
+            .factual_grounding
+            .contains("claims were not verified")
+    );
+    println!("SEMANTIC_MEMORY_GENERATION={}", generated.continuation);
+    println!(
+        "SEMANTIC_GENERATION_REPETITION_METRICS={:?}",
+        generated.repetition_metrics()
+    );
+    let expected_json = serde_json::to_string(&before_restart).expect("serialisasi expected");
+
+    let child = Command::new(std::env::current_exe().expect("test executable"))
+        .args([
+            "--exact",
+            "semantic_memory_conditioned_generation_survives_process_restart",
+            "--nocapture",
+        ])
+        .env("SHELLA_SEMANTIC_GENERATION_RESTART_STORE", &semantic_path)
+        .env("SHELLA_SEMANTIC_GENERATION_RESTART_MODEL", &model_path)
+        .output()
+        .expect("proses pemulihan dijalankan");
+    assert!(
+        child.status.success(),
+        "child gagal: {}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    let stdout = String::from_utf8(child.stdout).expect("stdout UTF-8");
+    assert!(
+        stdout.contains(&format!("SEMANTIC_GENERATION_RESTART={expected_json}")),
+        "hasil generasi child berbeda: {stdout}"
+    );
+    cleanup(&semantic_path);
+    if owns_model_checkpoint {
+        fs::remove_file(&model_path).expect("checkpoint fixture dihapus");
+    }
+}
+
+#[test]
+fn semantic_generation_withholds_when_context_has_no_relevant_memory() {
+    let path = memory_path();
+    let mut semantic = SemanticMemory::open(&path, lexicon()).expect("semantic memory");
+    semantic
+        .analyze_in_context("pet-care", "kucing makan nasi")
+        .expect("fakta konteks dicatat");
+    let mut engine = Engine::new(
+        LifNetwork::new(LifConfig::new(1.0, 10.0, 1.0, -65.0, -70.0, -60.0, 1), 1)
+            .expect("network SDK"),
+    )
+    .with_semantic_memory(semantic);
+    let model = semantic_generation_fixture_model();
+    let result = engine
+        .session()
+        .generate_text_with_semantic_memory(
+            &model,
+            "anjing tidur apa?",
+            Some("pet-care"),
+            4,
+            GenerationConfig {
+                max_new_tokens: 8,
+                temperature: 0.0,
+                top_k: None,
+                top_p: None,
+                seed: 17,
+            },
+        )
+        .expect("abstention generatif");
+    assert_eq!(result.status, MemoryGenerationStatus::NoRelevantMemory);
+    assert!(result.retrieved_memory.is_empty());
+    assert!(result.generated.is_none());
+    drop(engine);
+    cleanup(&path);
+}
+
+#[test]
+fn semantic_generation_withholds_when_complete_recall_does_not_fit() {
+    let path = memory_path();
+    let mut semantic = SemanticMemory::open(&path, lexicon()).expect("semantic memory");
+    semantic
+        .analyze_in_context("pet-care", "kucing makan nasi")
+        .expect("fakta konteks dicatat");
+    let network = LifNetwork::new(LifConfig::new(1.0, 10.0, 1.0, -65.0, -70.0, -60.0, 1), 1)
+        .expect("network SDK");
+    let mut engine = Engine::new(network).with_semantic_memory(semantic);
+    let tokenizer = CharacterTokenizer::fit(["kucing makan nasi"]).expect("tokenizer");
+    let model = GenerativeLanguageModel::new(
+        TransformerConfig {
+            hidden_size: 8,
+            layer_count: 1,
+            head_count: 2,
+            max_context: 16,
+            seed: 7,
+            device: ComputeDevice::Cpu,
+        },
+        tokenizer,
+    )
+    .expect("model Candle");
+    let result = engine
+        .session()
+        .generate_text_with_semantic_memory(
+            &model,
+            "kucing makan apa?",
+            Some("pet-care"),
+            4,
+            GenerationConfig {
+                max_new_tokens: 8,
+                temperature: 0.0,
+                top_k: None,
+                top_p: None,
+                seed: 17,
+            },
+        )
+        .expect("abstention karena evidence terlalu panjang");
+    assert_eq!(
+        result.status,
+        MemoryGenerationStatus::EvidenceOutsideContextWindow
+    );
+    assert_eq!(result.retrieved_memory.len(), 1);
+    assert!(result.included_memory.is_empty());
+    assert!(result.generated.is_none());
+    drop(engine);
+    cleanup(&path);
 }

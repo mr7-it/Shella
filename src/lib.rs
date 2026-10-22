@@ -61,8 +61,8 @@ pub use knowledge::{
 pub use language::generative::{
     CharacterTokenizer, ComputeDevice, CorpusManifest, CorpusRecord, CorpusSourceManifest,
     CorpusSplit, DatasetSplitConfig, EpochMetrics, EvaluationMetrics, GeneratedText,
-    GenerationConfig, GenerationStrategy, GenerativeError, GenerativeLanguageModel, SplitManifest,
-    TrainingConfig, TrainingReport, TransformerConfig,
+    GenerationConfig, GenerationRepetitionMetrics, GenerationStrategy, GenerativeError,
+    GenerativeLanguageModel, SplitManifest, TrainingConfig, TrainingReport, TransformerConfig,
 };
 pub use language::{
     AssertionStatus, ConceptRelation, ContextResolution, DatasetEncoding, DatasetFileFormat,
@@ -95,6 +95,6 @@ pub use reasoning::{
 };
 pub use runtime::{LifRuntime, SimulationClock};
 pub use sdk::{
-    Engine, Input as SdkInput, InputKind as SdkInputKind, Output as SdkOutput,
-    Session as SdkSession,
+    Engine, Input as SdkInput, InputKind as SdkInputKind, MemoryConditionedGeneration,
+    MemoryGenerationError, MemoryGenerationStatus, Output as SdkOutput, Session as SdkSession,
 };

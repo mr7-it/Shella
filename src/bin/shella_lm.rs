@@ -1,9 +1,9 @@
 use serde::Serialize;
 use shella::{
-    CorpusSplit, DatasetSplitConfig, GenerationConfig, GenerativeLanguageModel, TrainingConfig,
-    TransformerConfig,
+    CorpusSplit, DatasetSplitConfig, GeneratedText, GenerationConfig, GenerationRepetitionMetrics,
+    GenerativeLanguageModel, TrainingConfig, TransformerConfig,
 };
-use std::{collections::BTreeMap, error::Error, path::PathBuf, time::Instant};
+use std::{collections::BTreeMap, error::Error, fs, path::PathBuf, time::Instant};
 
 fn main() {
     if let Err(error) = run() {
@@ -16,7 +16,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let mut args = std::env::args().skip(1);
     let command = args
         .next()
-        .ok_or("usage: shella-lm <train|generate|evaluate> --option value")?;
+        .ok_or("usage: shella-lm <train|generate|evaluate|metrics> --option value")?;
     let mut options = BTreeMap::new();
     while let Some(key) = args.next() {
         if !key.starts_with("--") {
@@ -33,7 +33,8 @@ fn run() -> Result<(), Box<dyn Error>> {
         "train" => train_command(options),
         "generate" => generate_command(options),
         "evaluate" => evaluate_command(options),
-        _ => Err("perintah harus train, generate, atau evaluate".into()),
+        "metrics" => metrics_command(options),
+        _ => Err("perintah harus train, generate, evaluate, atau metrics".into()),
     }
 }
 
@@ -160,6 +161,25 @@ fn generate_command(options: BTreeMap<String, String>) -> Result<(), Box<dyn Err
     let model = GenerativeLanguageModel::load_checkpoint(checkpoint)?;
     let generated = model.generate(prompt, config)?;
     println!("{}", serde_json::to_string_pretty(&generated)?);
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct GenerationMetricsReport {
+    repetition: GenerationRepetitionMetrics,
+}
+
+fn metrics_command(options: BTreeMap<String, String>) -> Result<(), Box<dyn Error>> {
+    reject_unknown(&options, &["--input-json"])?;
+    let input = required(&options, "--input-json")?;
+    if fs::metadata(input)?.len() > 1_000_000 {
+        return Err("berkas JSON generasi melebihi batas 1 MiB".into());
+    }
+    let generated: GeneratedText = serde_json::from_slice(&fs::read(input)?)?;
+    let report = GenerationMetricsReport {
+        repetition: generated.repetition_metrics(),
+    };
+    println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
 }
 

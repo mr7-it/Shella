@@ -5,10 +5,67 @@ use crate::{
     decision::{Candidate, Decision},
     evaluator::{RewardEvaluation, RewardEvaluator},
     language::SemanticResponse,
-    language::{EncodedText, SemanticAnalysis, SemanticResonance},
+    language::{EncodedText, SemanticAnalysis, SemanticRecall, SemanticResonance},
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::Path;
+use std::{fmt, path::Path};
+
+const MAX_MEMORY_RETRIEVAL_LIMIT: usize = 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryGenerationStatus {
+    Generated,
+    NoRelevantMemory,
+    EvidenceOutsideContextWindow,
+}
+
+/// Output of the additive SemanticMemory-conditioned Transformer path.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryConditionedGeneration {
+    pub input_prompt: String,
+    pub context_id: Option<String>,
+    pub status: MemoryGenerationStatus,
+    /// Retrieval candidates, ordered by SemanticMemory relevance; scores are not confidence.
+    pub retrieved_memory: Vec<SemanticRecall>,
+    /// Complete recall statements that actually fit in the model's input window.
+    pub included_memory: Vec<SemanticRecall>,
+    /// None means generation was withheld because no usable semantic evidence fit.
+    pub generated: Option<GeneratedText>,
+}
+
+#[derive(Debug)]
+pub enum MemoryGenerationError {
+    SemanticMemory(SimError),
+    Generative(GenerativeError),
+}
+
+impl fmt::Display for MemoryGenerationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SemanticMemory(error) => {
+                write!(formatter, "semantic-memory retrieval failed: {error}")
+            }
+            Self::Generative(error) => write!(formatter, "neural generation failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for MemoryGenerationError {}
+
+impl From<SimError> for MemoryGenerationError {
+    fn from(error: SimError) -> Self {
+        Self::SemanticMemory(error)
+    }
+}
+
+impl From<GenerativeError> for MemoryGenerationError {
+    fn from(error: GenerativeError) -> Self {
+        Self::Generative(error)
+    }
+}
 
 /// Sesi eksklusif yang mengirim input ke satu engine.
 pub struct Session<'a> {
@@ -24,6 +81,97 @@ impl Session<'_> {
         config: GenerationConfig,
     ) -> Result<GeneratedText, GenerativeError> {
         model.generate(prompt, config)
+    }
+
+    /// Retrieves context-relevant memory and places complete recall statements before the query
+    /// in the same autoregressive input. It abstains when no evidence fits; generated text remains
+    /// unverified and must not be treated as a fact merely because memory was supplied.
+    pub fn generate_text_with_semantic_memory(
+        &mut self,
+        model: &GenerativeLanguageModel,
+        prompt: &str,
+        context_id: Option<&str>,
+        retrieval_limit: usize,
+        config: GenerationConfig,
+    ) -> Result<MemoryConditionedGeneration, MemoryGenerationError> {
+        if retrieval_limit > MAX_MEMORY_RETRIEVAL_LIMIT {
+            return Err(SimError::InvalidInput {
+                parameter: "retrieval_limit",
+                reason: "batas recall generasi adalah 32",
+            }
+            .into());
+        }
+        model.tokenizer().encode_characters(prompt)?;
+        self.engine.synchronize_persistent_memories()?;
+        let memory = self
+            .engine
+            .semantic_memory
+            .as_ref()
+            .ok_or(SimError::InvalidInput {
+                parameter: "semantic_memory",
+                reason: "engine belum memasang SemanticMemory",
+            })?;
+        let retrieved_memory = memory.retrieve(prompt, context_id, retrieval_limit)?;
+        let mut result = MemoryConditionedGeneration {
+            input_prompt: prompt.to_owned(),
+            context_id: context_id.map(str::to_owned),
+            status: MemoryGenerationStatus::NoRelevantMemory,
+            retrieved_memory,
+            included_memory: Vec::new(),
+            generated: None,
+        };
+        if result.retrieved_memory.is_empty() {
+            return Ok(result);
+        }
+
+        let mut included_text = Vec::new();
+        let mut unique_text = std::collections::BTreeSet::new();
+        for recall in &result.retrieved_memory {
+            let normalized_key = recall.text.trim().to_lowercase();
+            if normalized_key.is_empty() || !unique_text.insert(normalized_key) {
+                continue;
+            }
+            let safe_text = recall
+                .text
+                .trim()
+                .replace('"', "'")
+                .replace(['\n', '\r', '\t'], " ");
+            let candidate_text = if included_text.is_empty() {
+                safe_text.clone()
+            } else {
+                format!("{}; {safe_text}", included_text.join("; "))
+            };
+            let candidate_prompt = format!(
+                "catatan {candidate_text} tanya {} jawab",
+                prompt.replace('"', "'").replace(['\n', '\r', '\t'], " ")
+            );
+            let encoded_length = model
+                .tokenizer()
+                .encode_characters(&candidate_prompt)?
+                .len()
+                + 1;
+            if encoded_length <= model.config().max_context {
+                included_text.push(safe_text);
+                result.included_memory.push(recall.clone());
+            }
+        }
+        if result.included_memory.is_empty() {
+            result.status = MemoryGenerationStatus::EvidenceOutsideContextWindow;
+            return Ok(result);
+        }
+
+        let model_prompt = format!(
+            "catatan {} tanya {} jawab",
+            included_text.join("; "),
+            prompt.replace('"', "'").replace(['\n', '\r', '\t'], " ")
+        );
+        let mut generated = model.generate(&model_prompt, config)?;
+        generated.factual_grounding =
+            "unverified neural text; SemanticMemory recall was supplied as context, but claims were not verified"
+                .to_owned();
+        result.generated = Some(generated);
+        result.status = MemoryGenerationStatus::Generated;
+        Ok(result)
     }
 
     /// Menjalankan input bahasa melalui semantic response dan ReasoningEngine.

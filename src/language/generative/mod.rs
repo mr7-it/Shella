@@ -9,7 +9,9 @@ pub use dataset::{
     CorpusManifest, CorpusRecord, CorpusSourceManifest, CorpusSplit, DatasetSplitConfig,
     SplitManifest,
 };
-pub use generation::{GeneratedText, GenerationConfig, GenerationStrategy};
+pub use generation::{
+    GeneratedText, GenerationConfig, GenerationRepetitionMetrics, GenerationStrategy,
+};
 pub use model::{ComputeDevice, TransformerConfig};
 pub use tokenizer::{BOS_ID, CharacterTokenizer, EOS_ID, PAD_ID, UNK_ID};
 pub use training::{EpochMetrics, EvaluationMetrics, TrainingConfig, TrainingReport};

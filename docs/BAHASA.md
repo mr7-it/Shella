@@ -221,12 +221,13 @@ bahasa memadai. Ini contoh yang dilaporkan apa adanya, bukan bukti kemampuan
 menjawab pertanyaan atau memanfaatkan evidence semantic.
 
 Model bahasa karakter kecil ini menghasilkan kelanjutan teks statistik, bukan
-fakta terverifikasi. Ia tidak membaca `SemanticMemory`, `LearningMemory`,
-`LanguageNetwork`, atau output reasoning saat generasi; pemuatan WordNet tidak
-menjadi bobotnya. `GeneratedText::factual_grounding` menyatakan bahwa provenance
-faktual tidak digunakan. `Session::generate_text` adalah delegasi opsional ke model
-yang diberikan caller. Untuk pertanyaan faktual gunakan `SemanticMemory` response
-berbukti; jangan menampilkan teks generator sebagai jawaban fakta tanpa verifikasi.
+fakta terverifikasi. Jalur lama `Session::generate_text` tidak membaca
+`SemanticMemory`, `LearningMemory`, `LanguageNetwork`, atau output reasoning;
+pemuatan WordNet tidak menjadi bobotnya. API tambahan yang didokumentasikan di
+bawah dapat menyisipkan recall `SemanticMemory` sebagai teks conditioning, tetapi
+tidak membuktikan klaim keluaran dan tetap berlabel unverified. `GeneratedText::factual_grounding`
+menyatakan batas provenance ini. Untuk pertanyaan faktual gunakan `SemanticMemory`
+response berbukti; jangan menampilkan teks generator sebagai jawaban fakta tanpa verifikasi.
 Loss/perplexity holdout hanya mengukur prediksi karakter pada korpus ini, bukan
 koherensi, pemahaman, atau generalisasi bahasa Indonesia secara luas.
 
@@ -297,3 +298,39 @@ kalimat sederhana dan data terstruktur ini; hasil tersebut bukan bukti paraphras
 umum, pemahaman bahasa, atau generalisasi lintas sumber. Benchmark ada pada
 `tests/semantic_language.rs` dan dapat diulang dengan `cargo test --test
 semantic_language benchmark_polaritas_100_test_group_held_out_membandingkan_baseline_dan_feedback --locked`.
+
+
+## SemanticMemory-conditioned Transformer inference
+
+`Session::generate_text` tetap merupakan API lama tanpa retrieval. Jalur baru
+`Session::generate_text_with_semantic_memory(model, prompt, context_id, retrieval_limit,
+config)` memakai `SemanticMemory` yang terpasang pada `Engine`, memanggil retrieval
+kontekstual, lalu menyertakan hanya pernyataan recall utuh yang muat sebelum prompt
+pengguna di jendela autoregresif Transformer. Nilai `retrieval_limit` dibatasi sampai
+32. `MemoryConditionedGeneration` mengembalikan kandidat recall, subset yang benar-benar
+dimasukkan, prompt pengguna asli, status, dan hasil model bila generasi dilakukan.
+
+Jika tidak ada recall relevan atau pernyataannya tidak muat pada context window,
+`generated` bernilai `None` dan status menunjukkan abstention; jalur ini tidak diam-diam
+beralih ke generasi tanpa memory. Bila generasi terjadi, output tetap berlabel
+`unverified`: skor recall adalah ranking heuristik, bukan confidence atau entailment,
+dan model tidak memverifikasi klaim keluaran terhadap memory. `SemanticMemory::retrieve`
+terutama mencari pernyataan konteks berdasarkan WordID/relasi langsung; hasil ini tidak
+menambahkan provenance sumber leksikal ke klaim generator. Gunakan `respond_in_context`
+untuk jalur jawaban semantik berbukti dan abstention yang sudah ada.
+
+Decoding kini menolak kandidat yang akan mengulang karakter 4-gram dari kelanjutan
+sebelumnya bila kandidat alternatif tersedia. Bila seluruh kandidat akan mengulang,
+decoder kembali ke himpunan awal agar tidak dead-end; ini heuristik permukaan, bukan
+jaminan koherensi dan dapat membatasi pola bahasa yang sah. `GeneratedText::repetition_metrics()`
+melaporkan rasio karakter unik, repeated bigram/trigram/4-gram, adjacent repeat, EOS, dan
+prompt truncation. Metrik tersebut bukan skor kelancaran. CLI `shella-lm metrics
+--input-json <hasil-generate.json>` menghitung diagnostik ini dari JSON generasi yang
+nyata. Perplexity tetap dihitung terpisah melalui `shella-lm evaluate` pada split yang
+tercatat di manifest.
+
+Checkpoint `SHLMLM01` tidak diubah oleh integrasi ini; store SemanticMemory tetap
+persisten secara terpisah. Tes integrasi memulai executable test kedua, membuka ulang
+store dan checkpoint, serta membandingkan hasil generasi deterministik. Generator masih
+merupakan next-character LM kecil yang dilatih pada NusaX-Senti saja; recall tidak
+mengubah tujuan training menjadi instruction tuning.
