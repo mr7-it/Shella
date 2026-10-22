@@ -58,6 +58,12 @@ pub use knowledge::{
     FeatureScaler, FeatureStatistics, FeatureType, IrisFeatures, LegacyPrototypeSnapshot,
     ModelApprovalStatus, Prototype, PrototypeCandidateScore, SCORING_VERSION, feature_definitions,
 };
+pub use language::generative::{
+    CharacterTokenizer, ComputeDevice, CorpusManifest, CorpusRecord, CorpusSourceManifest,
+    CorpusSplit, DatasetSplitConfig, EpochMetrics, EvaluationMetrics, GeneratedText,
+    GenerationConfig, GenerationStrategy, GenerativeError, GenerativeLanguageModel, SplitManifest,
+    TrainingConfig, TrainingReport, TransformerConfig,
+};
 pub use language::{
     AssertionStatus, ConceptRelation, ContextResolution, DatasetEncoding, DatasetFileFormat,
     DatasetFileIntegrity, DatasetId, DatasetIntegrityManifest, DatasetIntegrityReport,

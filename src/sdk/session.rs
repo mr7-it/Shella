@@ -1,6 +1,7 @@
 use super::{Engine, Input, Output};
 use crate::{
-    LanguageNetwork, ReasoningEngine, ReasoningResult, SemanticLearningOutcome, SimError,
+    GeneratedText, GenerationConfig, GenerativeError, GenerativeLanguageModel, LanguageNetwork,
+    ReasoningEngine, ReasoningResult, SemanticLearningOutcome, SimError,
     decision::{Candidate, Decision},
     evaluator::{RewardEvaluation, RewardEvaluator},
     language::SemanticResponse,
@@ -14,6 +15,17 @@ pub struct Session<'a> {
     pub(crate) engine: &'a mut Engine,
 }
 impl Session<'_> {
+    /// Menghasilkan kelanjutan neural dari model decoder yang diberikan pemanggil.
+    /// Jalur ini tidak memakai SemanticMemory dan hasilnya tidak terverifikasi faktual.
+    pub fn generate_text(
+        &self,
+        model: &GenerativeLanguageModel,
+        prompt: &str,
+        config: GenerationConfig,
+    ) -> Result<GeneratedText, GenerativeError> {
+        model.generate(prompt, config)
+    }
+
     /// Menjalankan input bahasa melalui semantic response dan ReasoningEngine.
     /// `ReasoningEngine` tetap menjadi pemilik tunggal SemanticMemory/LearningMemory.
     #[allow(clippy::too_many_arguments)]

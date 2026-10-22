@@ -1,5 +1,6 @@
 //! Pipeline bahasa lokal dengan analisis semantik dan respons konservatif berbukti.
 mod encoder;
+pub mod generative;
 mod indonesian;
 mod network;
 mod normalization;
@@ -8,6 +9,12 @@ mod tokenizer;
 mod vocabulary;
 
 pub use encoder::{EncodedText, TextEncoder};
+pub use generative::{
+    CharacterTokenizer, ComputeDevice, CorpusManifest, CorpusRecord, CorpusSourceManifest,
+    CorpusSplit, DatasetSplitConfig, EpochMetrics, EvaluationMetrics, GeneratedText,
+    GenerationConfig, GenerationStrategy, GenerativeError, GenerativeLanguageModel, SplitManifest,
+    TrainingConfig, TrainingReport, TransformerConfig,
+};
 pub use indonesian::{
     DatasetEncoding, DatasetFileFormat, DatasetFileIntegrity, DatasetId, DatasetIntegrityManifest,
     DatasetIntegrityReport, DatasetLoadReport, DatasetLoader, DatasetProvenance, HunspellAffixKind,

@@ -274,6 +274,41 @@ language_network, current_per_word_na, expected_action, predicted_action,
 action_neurons, learning_rate)`. Input dengan token unknown, ambiguitas, atau
 konflik tidak memperbarui readout/STDP atau menulis pengalaman learning.
 
+## Model generatif autoregresif
+
+`GenerativeLanguageModel` menggunakan decoder-only Transformer Candle 0.8.4,
+tokenizer karakter Unicode, dan CPU. Tokenizer hanya di-fit pada train split
+NusaX-Senti Indonesia; model tidak memakai `WordID` maupun membaca `SemanticMemory`
+saat menghasilkan teks. `Session::generate_text` mendelegasi ke model yang caller
+berikan secara eksplisit:
+
+```rust
+let model = GenerativeLanguageModel::load_checkpoint("shella-nusax.sllm")?;
+let generated = session.generate_text(
+    &model,
+    "bahasa Indonesia",
+    GenerationConfig::default(),
+)?;
+println!("{}", generated.full_text);
+// generated.factual_grounding menjelaskan bahwa teks belum diverifikasi.
+```
+
+Perintah lokal dari root repository:
+
+```sh
+cargo run --locked --bin shella-lm -- train --checkpoint shella-nusax.sllm
+cargo run --locked --bin shella-lm -- evaluate --checkpoint shella-nusax.sllm
+cargo run --locked --bin shella-lm -- generate --checkpoint shella-nusax.sllm --prompt "bahasa Indonesia"
+```
+
+`train` membandingkan baseline/final validation; test internal dievaluasi hanya
+setelah training selesai, dan label sentiment bukan target generasi. JSON report
+memuat source hash/license, split, deduplikasi, konfigurasi serta metrik aktual.
+`evaluate` menolak dataset/split/hash yang tidak sama dengan checkpoint. Teks
+generatif belum memiliki evidence/provenance faktual dan tidak menggantikan
+`SemanticMemory` untuk menjawab pertanyaan fakta. Perplexity tidak mengukur
+factuality, koherensi, atau generalisasi populasi.
+
 Gunakan `fit_confidence_calibration_with_ids` dengan `CalibrationSample` untuk
 memastikan ID unik dan split validation/evaluation tidak overlap. API lama tanpa ID
 dipertahankan demi kompatibilitas; pemanggilnya tetap bertanggung jawab atas split.

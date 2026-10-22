@@ -18,7 +18,18 @@ lisensi yang sama kecuali sumber menyatakannya.
 | NusaX-Senti | Commit NusaX yang sama | 36 CSV untuk 12 bahasa × train/valid/test; 2,019,311 byte | CC BY-SA 4.0 | Loader memvalidasi label `positive`/`neutral`/`negative`, ID, bahasa, dan split. Teks memakai tokenizer Shella; evaluator menerima prediksi eksternal dan menolak split train. Tidak ada classifier yang dilatih. |
 | NusaX-Lexicon | Commit NusaX yang sama | 11 CSV Indonesian-to-language; 250,390 byte | CC BY-SA 4.0 | Loader menyediakan lookup frasa dan pencarian Indonesian; serialisasi memulihkan indeks. API dapat mengintern token pasangan ke vocabulary `LanguageNetwork`, tetapi tidak membuat sinaps atau belajar otomatis. |
 | [IndoNLI](https://github.com/ir-nlp-csui/indonli) | Repository tersedia; tidak ada revisi data yang dipin | JSONL dan arsip terjemahan tersedia upstream | Tidak ditemukan lisensi dataset yang mencakup anotasi dan teks sumber | Ditolak oleh registry; tidak diunduh, tidak diparse, dan tidak digunakan untuk evaluasi. |
-| [IndoSum](https://github.com/kata-ai/indosum) | Dataset Google Drive `1OgYbPfXFAv3TbwP1Qcwt_CC9cVWSJaco`; changelog `2019-03-20`; SHA-256 `34e5c504f711dd8ec0e87dbf10eb1dbaefca86717194f95a14476afeb8810108` | `tar.gz` 96,037,108 byte; JSONL per fold/split; ukuran arsip terurai 404,039,680 byte | CC BY-SA 4.0, tercantum di `README.txt` yang ikut dalam arsip; setiap record mempertahankan `source` dan `source_url` | Arsip dan notice data asli dibundel. Loader memverifikasi hash, membaca satu JSONL split per panggilan, memvalidasi record, menyediakan oracle extractive berlabel, dan menghitung token-level ROUGE-1 untuk kandidat pemanggil. Tidak ada summarizer yang dilatih. |
+| [IndoSum](https://github.com/kata-ai/indosum) | Dataset Google Drive `1OgYbPfXFAv3TbwP1Qcwt_CC9cVWSJaco`; changelog `2019-03-20`; SHA-256 `34e5c504f711dd8ec0e87dbf10eb1dbaefca86717194f95a14476afeb8810108` | `tar.gz` 96,037,108 byte; JSONL per fold/split; ukuran arsip terurai 404,039,680 byte | CC BY-SA 4.0, tercantum di `README.txt` yang ikut dalam arsip; setiap record mempertahankan `source` dan `source_url` | Arsip dan notice data asli dibundel. Loader memverifikasi hash, membaca hanya satu JSONL split, memvalidasi record, menyediakan oracle extractive berlabel, dan menghitung token-level ROUGE-1 untuk kandidat pemanggil. Tidak ada summarizer yang dilatih. |
+
+Jalur pretraining neural yang tersedia menggunakan **hanya** file resmi
+NusaX-Senti Indonesia `train.csv` yang dipin di atas. Loader mengabaikan label
+sentimen, menghapus duplikat sebelum membagi dokumen NusaX train secara
+deterministik menjadi train/validation/test internal; hanya train internal yang
+masuk optimizer, dan tokenizer di-fit dari train saja. Official NusaX
+validation/test, NusaX-MT, dan IndoSum tidak digunakan untuk gradien. Test internal
+hanya dievaluasi setelah training. Provenance, source hash, ID per split, dan
+aturan deduplikasi tersimpan di checkpoint. Lisensi CC BY-SA 4.0 dan atribusi
+NusaX tetap berlaku pada penggunaan/redistribusi dataset sesuai syarat lisensi;
+jumlah aktual untuk sebuah run dicetak oleh CLI `shella-lm train`.
 
 WordNet Bahasa r24 dipin ke commit `fb201ec6155dc5c3a23d76673cfbb28630bc9a67`
 `open-language/wordnets`; file membership dan definisi cocok dengan Git blob

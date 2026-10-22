@@ -360,11 +360,11 @@ impl IndonesianVocabulary {
             registry.verify(&relation.dataset)?;
             let is_dependency =
                 matches!(relation.relation_type, LexicalRelationType::Dependency(_));
-            if (!is_dependency && !registry.supports_semantic_relations(&relation.dataset)?)
-                || (!is_dependency
+            if !(is_dependency
+                || (registry.supports_semantic_relations(&relation.dataset)?
                     && relation
                         .source_word
-                        .is_none_or(|source| source == relation.target_word))
+                        .is_some_and(|source| source != relation.target_word)))
                 || relation
                     .source_word
                     .is_some_and(|source| staged.by_word_id(source).is_none())

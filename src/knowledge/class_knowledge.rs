@@ -1202,10 +1202,10 @@ fn select_exemplars(
                     .then_with(|| left.0.0.cmp(&right.0.0))
             })
             .map(|entry| entry.0);
-        if let Some(nearest) = nearest
-            && !selected.iter().any(|(sample, _)| sample.0 == nearest.0)
-        {
-            selected.push((nearest, ExemplarReason::ClusterRepresentative));
+        if let Some(nearest) = nearest {
+            if !selected.iter().any(|(sample, _)| sample.0 == nearest.0) {
+                selected.push((nearest, ExemplarReason::ClusterRepresentative));
+            }
         }
     }
     selected

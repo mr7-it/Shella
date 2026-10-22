@@ -172,6 +172,64 @@ aturan tersebut dari 12.668 baris definisi yang diparse. Contoh holdout “Apa a
 heterotrof?” dijawab dari gloss upstream. Keberadaan gloss yang diimpor bukan bukti
 neural learning.
 
+## Neural autoregressive text generation
+
+`GenerativeLanguageModel` adalah decoder-only Transformer causal berbasis Candle
+0.8.4 yang menghitung next-character cross-entropy dan belajar dengan AdamW serta
+autograd di CPU. Tokenizer Unicode karakter dibangun hanya dari teks split train;
+vocabulary ini khusus model neural dan tidak mengganti `Vocabulary`/`WordID`
+leksikal Shella. Model dan checkpoint menyimpan provenance serta manifest split.
+
+`load_nusax_training_corpus` menerima file resmi NusaX-Senti Bahasa Indonesia
+split train yang hash-pinned dan CC BY-SA 4.0. Loader menormalisasi NFC/lowercase,
+menghapus dokumen duplikat persis dan near-duplicate konservatif sebelum
+deterministic split 80/10/10 (seed default 42). Gradien hanya melihat train;
+validation dipakai mengukur loss tiap epoch dan membandingkan baseline dengan model
+akhir. Test dibaca hanya setelah optimizer selesai, satu kali untuk metrik final.
+Label sentimen bukan target, NusaX-MT tidak ditambahkan, dan official NusaX valid/test
+tidak dibaca. Hyperparameter tidak dipilih dari test. CLI train menyimpan checkpoint
+checksummed dengan manifest, provenance, serta metrik; model AdamW optimizer state
+tidak disimpan sehingga training tidak dapat di-resume tepat di tengah epoch.
+
+Satu run aktual pada 2026-10-22 memakai commit NusaX
+`75b0be5d982348332509f296e10d9bf9cb66d60f`, SHA-256 source train
+`698c4802111085c14fbe35122957e1145338d307bcc295764026a23095a32984`, seed
+split 42 dan training 2026. Dari 500 record sumber, 0 exact dan 0 near-duplicate
+dibuang; split menjadi 400/50/50 dokumen (train/validation/test), dengan 61,259 /
+7,592 / 8,286 karakter-token yang dievaluasi termasuk token khusus. Model memiliki
+18,131 parameter, satu layer, hidden size 32, dua head, context 64, enam epoch,
+144 optimizer step per epoch. Loss dihitung atas posisi target karakter berikutnya;
+EOS termasuk satu target per dokumen dan BOS bukan label target. Baseline validation
+loss/perplexity **4.6024 / 99.72**;
+sesudah training **2.6201 / 13.74**. Training loss/perplexity epoch terakhir
+**2.5975 / 13.43**. Test internal yang baru disentuh sesudah training memberi
+loss/perplexity **2.5768 / 13.15** pada 8,286 token. Checkpoint aktual berukuran
+80,522 byte dan fingerprint SHA-256
+`c78e16bad5e94be514f1b72a52e732253fe40f538551957c15bf02b19aae259b`.
+
+Generasi greedy aktual dari checkpoint dengan prompt literal holdout
+`Bagaimana cara merawat tanaman di rumah?` (string tersebut tidak ditemukan di
+NusaX train) menghasilkan kelanjutan 100 karakter-token berikut:
+
+```text
+n san anga  s ma san s san sanganganga sa san san an an an an an a a a a a a a a a a a a a an a a a
+```
+
+Pengulangan pola ini bukan jawaban yang koheren. Ulangan inferensi dengan seed
+sama menghasilkan output byte-for-byte identik; determinisme tidak berarti mutu
+bahasa memadai. Ini contoh yang dilaporkan apa adanya, bukan bukti kemampuan
+menjawab pertanyaan atau memanfaatkan evidence semantic.
+
+Model bahasa karakter kecil ini menghasilkan kelanjutan teks statistik, bukan
+fakta terverifikasi. Ia tidak membaca `SemanticMemory`, `LearningMemory`,
+`LanguageNetwork`, atau output reasoning saat generasi; pemuatan WordNet tidak
+menjadi bobotnya. `GeneratedText::factual_grounding` menyatakan bahwa provenance
+faktual tidak digunakan. `Session::generate_text` adalah delegasi opsional ke model
+yang diberikan caller. Untuk pertanyaan faktual gunakan `SemanticMemory` response
+berbukti; jangan menampilkan teks generator sebagai jawaban fakta tanpa verifikasi.
+Loss/perplexity holdout hanya mengukur prediksi karakter pada korpus ini, bukan
+koherensi, pemahaman, atau generalisasi bahasa Indonesia secara luas.
+
 `ReasoningEngine::respond_text` mengorkestrasi response semantic dan `reason_text`:
 input dipakai untuk jawaban berbukti, di-encode oleh `LanguageNetwork`, lalu melewati
 recall `LearningMemory` dan transisi LIF. Hasil `ReasoningResult` saat ini adalah

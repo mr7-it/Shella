@@ -162,23 +162,24 @@ impl super::DatasetLoader {
                 linguistic.part_of_speech =
                     wordnet_part_of_speech(&member.synset_id).map(str::to_owned);
             }
-            if linguistic.definition.is_none()
-                && dataset
-                    .synsets_for_lemma(&member.lemma)
-                    .is_some_and(|synsets| synsets.len() == 1)
-                && !dataset.has_definition_conflict(&member.synset_id)
-                && let Some(definition) = dataset.definition(&member.synset_id)
-            {
-                let definition_source = registry.entry_provenance(
-                    DatasetId::WordNetBahasa,
-                    DEFINITION_PATH,
-                    definition.source_line,
-                )?;
-                linguistic.definition = Some(definition.text.clone());
-                linguistic.definition_source_entry_id =
-                    Some(definition_source.source_entry_id.clone());
-                source_for_definition.push(definition_source);
-                report.imported_definitions += 1;
+            if let Some(definition) = dataset.definition(&member.synset_id) {
+                if linguistic.definition.is_none()
+                    && dataset
+                        .synsets_for_lemma(&member.lemma)
+                        .is_some_and(|synsets| synsets.len() == 1)
+                    && !dataset.has_definition_conflict(&member.synset_id)
+                {
+                    let definition_source = registry.entry_provenance(
+                        DatasetId::WordNetBahasa,
+                        DEFINITION_PATH,
+                        definition.source_line,
+                    )?;
+                    linguistic.definition = Some(definition.text.clone());
+                    linguistic.definition_source_entry_id =
+                        Some(definition_source.source_entry_id.clone());
+                    source_for_definition.push(definition_source);
+                    report.imported_definitions += 1;
+                }
             }
             sources.extend(source_for_definition);
             let id = staged.upsert_dataset_entry(super::LexiconEntryInput {

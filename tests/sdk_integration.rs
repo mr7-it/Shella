@@ -1,8 +1,9 @@
 use serde_json::json;
 use shella::{
-    Candidate, DecisionPolicy, Engine, LifConfig, LifNetwork, MemoryStore, RewardEvaluator,
+    Candidate, CharacterTokenizer, ComputeDevice, DecisionPolicy, Engine, GenerationConfig,
+    GenerativeLanguageModel, LifConfig, LifNetwork, MemoryStore, RewardEvaluator,
     RewardEvaluatorConfig, RewardModulatedStdpConfig, SdkInput as Input, StdpConfig, TextEncoder,
-    Vocabulary,
+    TransformerConfig, Vocabulary,
 };
 use std::{
     collections::BTreeMap,
@@ -144,6 +145,41 @@ fn sdk_mengembalikan_error_untuk_komponen_opsional_yang_tidak_dipasang() {
     );
     assert!(session.decide(&[]).is_err());
     assert!(session.remember("key", json!(1), &[]).is_err());
+}
+
+#[test]
+fn sdk_mengekspos_generasi_neural_opsional_dan_label_factual_grounding() {
+    let tokenizer = CharacterTokenizer::fit(["halo"]).expect("tokenizer karakter");
+    let model = GenerativeLanguageModel::new(
+        TransformerConfig {
+            hidden_size: 8,
+            layer_count: 1,
+            head_count: 2,
+            max_context: 8,
+            seed: 7,
+            device: ComputeDevice::Cpu,
+        },
+        tokenizer,
+    )
+    .expect("decoder Transformer");
+    let mut engine = Engine::new(network());
+    let generated = engine
+        .session()
+        .generate_text(
+            &model,
+            "halo",
+            GenerationConfig {
+                max_new_tokens: 1,
+                temperature: 0.0,
+                top_k: None,
+                top_p: None,
+                seed: 1,
+            },
+        )
+        .expect("generasi melalui SDK");
+    assert_eq!(generated.prompt, "halo");
+    assert_eq!(generated.generated_tokens, 1);
+    assert!(generated.factual_grounding.contains("unverified"));
 }
 
 #[test]

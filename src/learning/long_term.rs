@@ -900,13 +900,13 @@ impl LearningMemory {
                 for experience in std::iter::once(&retained.1)
                     .chain(group.iter().map(|(_, experience)| experience))
                 {
-                    if let Some(values) = &experience.embedding
-                        && values.len() == embedding.len()
-                    {
-                        for (sum, value) in embedding.iter_mut().zip(values) {
-                            *sum += value;
+                    if let Some(values) = &experience.embedding {
+                        if values.len() == embedding.len() {
+                            for (sum, value) in embedding.iter_mut().zip(values) {
+                                *sum += value;
+                            }
+                            embedding_count += 1;
                         }
-                        embedding_count += 1;
                     }
                 }
                 if embedding_count > 0 {
