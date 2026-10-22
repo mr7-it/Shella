@@ -1,6 +1,6 @@
 use super::{
-    IndonesianVocabulary, LanguageNetwork, LexicalRelationType, LexiconEntryInput, normalize_text,
-    tokenize,
+    IndonesianVocabulary, LanguageNetwork, LexicalRelationType, LexiconEntryInput,
+    SourceProvenance, normalize_text, tokenize,
 };
 use crate::{NetworkStep, SimError, WordID, memory::MemoryStore};
 use serde::{Deserialize, Serialize};
@@ -179,6 +179,8 @@ struct ContextSentence {
     text: String,
     analysis: SemanticAnalysis,
     recorded_at_unix: u64,
+    #[serde(default)]
+    is_question: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -217,6 +219,51 @@ pub struct SemanticRecall {
     pub relevance: f64,
     pub reasons: Vec<String>,
     pub recorded_at_unix: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticQuestionIntent {
+    Definition,
+    Relation,
+    YesNo,
+    OpenQuestion,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticAnswerEvidence {
+    DirectSource,
+    ContextStatement,
+    ConflictingStatements,
+    Insufficient,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticConfidenceBand {
+    DirectSource,
+    ContextBound,
+    Conflicted,
+    Insufficient,
+}
+
+/// Jawaban konservatif yang mengikat kalimat, konteks, dan jejak bukti yang dipakai.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticResponse {
+    pub answer: String,
+    pub intent: SemanticQuestionIntent,
+    pub evidence_level: SemanticAnswerEvidence,
+    /// Kategori evidence, bukan confidence probabilistik terkalibrasi.
+    pub confidence_band: SemanticConfidenceBand,
+    pub analysis: SemanticAnalysis,
+    pub gaps: SemanticGapReport,
+    pub retrieved_context: Vec<SemanticRecall>,
+    pub evidence_ids: Vec<String>,
+    pub source_provenance: Vec<SourceProvenance>,
+    pub supporting_statements: Vec<String>,
+    pub reasoning: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -544,17 +591,16 @@ impl SemanticMemory {
         self.analyze_with_context(text, &[])
     }
 
-    pub fn analyze_in_context(
-        &mut self,
-        context_id: &str,
-        text: &str,
-    ) -> Result<SemanticAnalysis, SimError> {
-        validate_text_id("context_id", context_id)?;
-        let previous = self
-            .state
+    fn preceding_context_word_ids(&self, context_id: &str) -> Vec<WordID> {
+        self.state
             .contexts
             .get(context_id)
-            .and_then(|sentences| sentences.last())
+            .and_then(|sentences| {
+                sentences
+                    .iter()
+                    .rev()
+                    .find(|sentence| !sentence.is_question)
+            })
             .map(|sentence| {
                 sentence
                     .analysis
@@ -562,18 +608,94 @@ impl SemanticMemory {
                     .roles
                     .iter()
                     .find(|role| role.kind == SemanticRoleKind::Subject)
-                    .map(|role| role.word_ids.clone())
+                    .map(|_| role_word_ids(&sentence.analysis, SemanticRoleKind::Subject))
                     .unwrap_or_else(|| {
-                        sentence
-                            .analysis
-                            .tokens
-                            .iter()
-                            .filter(|token| token.known && self.is_noun(token.word_id))
-                            .map(|token| token.word_id)
+                        effective_word_ids(&sentence.analysis)
+                            .into_iter()
+                            .map(|(_, word_id)| word_id)
+                            .filter(|word_id| self.is_noun(*word_id))
                             .collect()
                     })
             })
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    /// Menjawab secara konservatif memakai gloss bersumber, edge semantic, dan
+    /// pernyataan terdahulu. Pertanyaan saat ini tidak dimasukkan ke retrieval
+    /// sampai jawaban selesai, agar tidak menjadi evidence bagi dirinya sendiri.
+    pub fn respond_in_context(
+        &mut self,
+        context_id: &str,
+        text: &str,
+        retrieval_limit: usize,
+    ) -> Result<SemanticResponse, SimError> {
+        validate_text_id("context_id", context_id)?;
+        let previous = self.preceding_context_word_ids(context_id);
+        let analysis = self.analyze_with_context(text, &previous)?;
+        let gaps = self.gaps_for_analysis(&analysis);
+        let local_context = self
+            .state
+            .contexts
+            .get(context_id)
+            .into_iter()
+            .flatten()
+            .filter(|sentence| !sentence.is_question)
+            .map(|sentence| sentence.text.as_str())
+            .collect::<BTreeSet<_>>();
+        let retrieved_context = self
+            .retrieve(text, Some(context_id), retrieval_limit)?
+            .into_iter()
+            .filter(|recall| local_context.contains(recall.text.as_str()))
+            .collect();
+        let intent = classify_question_intent(&analysis.normalized_text);
+        let mut response = SemanticResponse {
+            answer: "Saya belum memiliki bukti yang cukup untuk menjawab pertanyaan itu."
+                .to_owned(),
+            intent,
+            evidence_level: SemanticAnswerEvidence::Insufficient,
+            confidence_band: SemanticConfidenceBand::Insufficient,
+            analysis,
+            gaps,
+            retrieved_context,
+            evidence_ids: Vec::new(),
+            source_provenance: Vec::new(),
+            supporting_statements: Vec::new(),
+            reasoning: Vec::new(),
+        };
+
+        if !response.analysis.ambiguities.is_empty() {
+            response.reasoning.push(
+                "Ada token dengan lebih dari satu analisis leksikal; makna tidak dipilih otomatis."
+                    .to_owned(),
+            );
+        } else {
+            match response.intent {
+                SemanticQuestionIntent::Definition => {
+                    answer_definition(self, &mut response);
+                }
+                SemanticQuestionIntent::Relation => {
+                    answer_relation(self, &mut response);
+                }
+                SemanticQuestionIntent::YesNo => {
+                    answer_from_context(self, context_id, &mut response);
+                }
+                SemanticQuestionIntent::OpenQuestion => {
+                    answer_open_question(self, context_id, &mut response);
+                }
+            }
+        }
+
+        response.analysis = self.analyze_in_context(context_id, text)?;
+        Ok(response)
+    }
+
+    pub fn analyze_in_context(
+        &mut self,
+        context_id: &str,
+        text: &str,
+    ) -> Result<SemanticAnalysis, SimError> {
+        validate_text_id("context_id", context_id)?;
+        let previous = self.preceding_context_word_ids(context_id);
         let analysis = self.analyze_with_context(text, &previous)?;
         let normalized = analysis.normalized_text.clone();
         let mut next = self.state.clone();
@@ -582,6 +704,7 @@ impl SemanticMemory {
             text: normalized,
             analysis: analysis.clone(),
             recorded_at_unix: now_unix(),
+            is_question: is_question_text(text),
         });
         if sentences.len() > MAX_CONTEXT_SENTENCES {
             sentences.drain(..sentences.len() - MAX_CONTEXT_SENTENCES);
@@ -592,11 +715,18 @@ impl SemanticMemory {
 
     pub fn detect_gaps(&self, text: &str) -> Result<SemanticGapReport, SimError> {
         let analysis = self.analyze(text)?;
+        Ok(self.gaps_for_analysis(&analysis))
+    }
+
+    fn gaps_for_analysis(&self, analysis: &SemanticAnalysis) -> SemanticGapReport {
         let unknown_tokens = analysis
             .tokens
             .iter()
-            .filter(|token| !token.known)
-            .map(|token| token.surface.clone())
+            .enumerate()
+            .filter(|(index, token)| {
+                effective_word_id(analysis, *index).is_none() && !is_question_filler(&token.surface)
+            })
+            .map(|(_, token)| token.surface.clone())
             .collect();
         let ambiguous_tokens = analysis
             .ambiguities
@@ -607,29 +737,37 @@ impl SemanticMemory {
         let conflicting_tokens = analysis
             .tokens
             .iter()
-            .filter(|token| token.known && self.has_concept_conflict(token.word_id))
-            .map(|token| token.surface.clone())
+            .enumerate()
+            .filter(|(index, _)| {
+                effective_word_id(analysis, *index)
+                    .is_some_and(|word_id| self.has_concept_conflict(word_id))
+            })
+            .map(|(_, token)| token.surface.clone())
             .collect();
         let predicates_without_known_roles = analysis
             .structure
             .predicate_token
+            .filter(|index| effective_word_id(analysis, *index).is_none())
             .and_then(|index| analysis.tokens.get(index))
-            .filter(|token| !token.known)
             .map(|token| vec![token.surface.clone()])
             .unwrap_or_else(|| {
                 analysis
                     .tokens
                     .iter()
-                    .filter(|token| !token.known && looks_like_verb_candidate(&token.surface))
-                    .map(|token| token.surface.clone())
+                    .enumerate()
+                    .filter(|(index, token)| {
+                        effective_word_id(analysis, *index).is_none()
+                            && looks_like_verb_candidate(&token.surface)
+                    })
+                    .map(|(_, token)| token.surface.clone())
                     .collect()
             });
-        Ok(SemanticGapReport {
+        SemanticGapReport {
             unknown_tokens,
             ambiguous_tokens,
             conflicting_tokens,
             predicates_without_known_roles,
-        })
+        }
     }
 
     pub fn retrieve(
@@ -644,12 +782,16 @@ impl SemanticMemory {
         if let Some(id) = context_id {
             validate_text_id("context_id", id)?;
         }
-        let analysis = self.analyze(query)?;
-        let query_ids = analysis
-            .tokens
-            .iter()
-            .filter(|token| token.known)
-            .map(|token| token.word_id)
+        let analysis = if let Some(id) = context_id {
+            let previous = self.preceding_context_word_ids(id);
+            self.analyze_with_context(query, &previous)?
+        } else {
+            self.analyze(query)?
+        };
+        let query_ids = effective_word_ids(&analysis)
+            .into_iter()
+            .filter(|(index, _)| !is_question_filler(&analysis.tokens[*index].surface))
+            .map(|(_, word_id)| word_id)
             .collect::<BTreeSet<_>>();
         if query_ids.is_empty() {
             return Ok(Vec::new());
@@ -657,12 +799,15 @@ impl SemanticMemory {
         let mut results = Vec::new();
         for (stored_context, sentences) in &self.state.contexts {
             for sentence in sentences {
-                let memory_ids = sentence
-                    .analysis
-                    .tokens
-                    .iter()
-                    .filter(|token| token.known)
-                    .map(|token| token.word_id)
+                if sentence.is_question {
+                    continue;
+                }
+                let memory_ids = effective_word_ids(&sentence.analysis)
+                    .into_iter()
+                    .filter(|(index, _)| {
+                        !is_question_filler(&sentence.analysis.tokens[*index].surface)
+                    })
+                    .map(|(_, word_id)| word_id)
                     .collect::<BTreeSet<_>>();
                 let mut exact = 0.0;
                 let mut related = 0.0;
@@ -1145,7 +1290,10 @@ impl SemanticMemory {
         let mut roles = Vec::new();
         if let Some(predicate) = predicate_token {
             let subject_indices = (0..predicate)
-                .filter(|index| !is_negation(&tokens[*index].surface))
+                .filter(|index| {
+                    !is_negation(&tokens[*index].surface)
+                        && !is_question_filler(&tokens[*index].surface)
+                })
                 .collect::<Vec<_>>();
             if let (Some(start), Some(end)) = (subject_indices.first(), subject_indices.last()) {
                 roles.push(self.role_from_indices(
@@ -1345,7 +1493,8 @@ impl SemanticMemory {
             .filter(|relation| {
                 ((relation.source == left && relation.target == right)
                     || (relation.source == right && relation.target == left))
-                    && relation.evidence.confidence.is_some()
+                    && (relation.evidence.confidence.is_some()
+                        || relation.evidence.status != AssertionStatus::Hypothesis)
             })
             .map(|relation| {
                 let base = match relation.kind {
@@ -1362,7 +1511,7 @@ impl SemanticMemory {
                     1.0
                 };
                 (
-                    base * relation.evidence.confidence.unwrap_or_default() * status_weight,
+                    base * relation.evidence.confidence.unwrap_or(1.0) * status_weight,
                     relation.kind,
                 )
             })
@@ -1449,6 +1598,9 @@ impl SemanticMemory {
             .collect::<Vec<_>>();
         let mut next = self.state.clone();
         for relation in relations {
+            if self.relation_conflicts(&relation) {
+                continue;
+            }
             if !next.relations.contains(&relation) {
                 next.relations.push(relation);
             }
@@ -1485,6 +1637,574 @@ impl SemanticMemory {
         )?;
         Ok(())
     }
+}
+
+fn classify_question_intent(text: &str) -> SemanticQuestionIntent {
+    let tokens = text.split_whitespace().collect::<Vec<_>>();
+    if tokens.starts_with(&["apa", "arti"])
+        || tokens.starts_with(&["apa", "makna"])
+        || tokens.starts_with(&["apa", "itu"])
+        || tokens.first() == Some(&"definisikan")
+        || tokens.first() == Some(&"definisi")
+    {
+        SemanticQuestionIntent::Definition
+    } else if tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "hubungan" | "sinonim" | "antonim" | "termasuk" | "bagian" | "penyebab" | "menyebabkan"
+        )
+    }) {
+        SemanticQuestionIntent::Relation
+    } else if tokens.first() == Some(&"apakah") || tokens.first() == Some(&"benarkah") {
+        SemanticQuestionIntent::YesNo
+    } else {
+        SemanticQuestionIntent::OpenQuestion
+    }
+}
+
+fn is_question_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.ends_with('?')
+        || matches!(
+            classify_question_intent(&normalize_text(trimmed).unwrap_or_default()),
+            SemanticQuestionIntent::Definition
+                | SemanticQuestionIntent::Relation
+                | SemanticQuestionIntent::YesNo
+        )
+        || [
+            "siapa ",
+            "apa ",
+            "di mana ",
+            "kapan ",
+            "mengapa ",
+            "kenapa ",
+            "bagaimana ",
+        ]
+        .iter()
+        .any(|prefix| normalize_text(trimmed).is_ok_and(|text| text.starts_with(prefix)))
+}
+
+fn is_question_filler(token: &str) -> bool {
+    matches!(
+        token,
+        "apa"
+            | "apakah"
+            | "arti"
+            | "makna"
+            | "definisi"
+            | "definisikan"
+            | "itu"
+            | "adalah"
+            | "dari"
+            | "tentang"
+            | "hubungan"
+            | "antara"
+            | "dengan"
+            | "dan"
+            | "atau"
+            | "termasuk"
+            | "jenis"
+            | "bagian"
+            | "sinonim"
+            | "antonim"
+            | "benarkah"
+            | "yang"
+            | "siapa"
+            | "di"
+            | "mana"
+            | "kapan"
+            | "mengapa"
+            | "kenapa"
+            | "bagaimana"
+            | "menyebabkan"
+            | "penyebab"
+            | "tidak"
+            | "bukan"
+            | "belum"
+            | "tak"
+            | "nggak"
+    )
+}
+
+fn query_terms(response: &SemanticResponse) -> Vec<&SemanticToken> {
+    response
+        .analysis
+        .tokens
+        .iter()
+        .filter(|token| !is_question_filler(&token.surface))
+        .collect()
+}
+
+fn answer_definition(memory: &SemanticMemory, response: &mut SemanticResponse) {
+    let targets = query_terms(response)
+        .into_iter()
+        .filter(|token| token.known)
+        .collect::<Vec<_>>();
+    if targets.len() != 1 {
+        response
+            .reasoning
+            .push("Pertanyaan harus menyebut tepat satu lema definisi yang dikenal.".to_owned());
+        return;
+    }
+    let token = targets[0];
+    let Some(entry) = memory.state.lexicon.by_word_id(token.word_id) else {
+        return;
+    };
+    let (Some(definition), Some(source_id)) = (
+        entry.linguistic.definition.as_deref(),
+        entry.linguistic.definition_source_entry_id.as_deref(),
+    ) else {
+        response
+            .reasoning
+            .push("Lema tersedia, tetapi belum memiliki definisi bersumber.".to_owned());
+        return;
+    };
+    let Some(source) = entry
+        .sources
+        .iter()
+        .find(|source| source.source_entry_id == source_id)
+    else {
+        response
+            .reasoning
+            .push("Rujukan definisi tidak cocok dengan provenance entri.".to_owned());
+        return;
+    };
+    let source_label = if source.source_uri.contains("open-language/wordnets") {
+        "WordNet Bahasa"
+    } else {
+        source.source_name.as_str()
+    };
+    response.answer = format!(
+        "Menurut {source_label}, {} berarti: {}.",
+        entry.headword, definition
+    );
+    response.evidence_level = SemanticAnswerEvidence::DirectSource;
+    response.confidence_band = SemanticConfidenceBand::DirectSource;
+    response.evidence_ids.push(source_id.to_owned());
+    response.source_provenance.push(source.clone());
+    response.supporting_statements.push(definition.to_owned());
+    response.reasoning.push(
+        "Definisi diambil dari gloss yang terikat ke synset dan provenance sumber.".to_owned(),
+    );
+}
+
+fn answer_relation(memory: &SemanticMemory, response: &mut SemanticResponse) {
+    let concepts = response
+        .analysis
+        .tokens
+        .iter()
+        .filter(|token| {
+            !is_question_filler(&token.surface) && token.known && memory.is_noun(token.word_id)
+        })
+        .collect::<Vec<_>>();
+    if concepts.len() != 2 {
+        response.reasoning.push(
+            "Relasi hanya dijawab bila tepat dua konsep noun dikenal dan tidak ambigu.".to_owned(),
+        );
+        return;
+    }
+    let Some(source_entry) = memory.state.lexicon.by_word_id(concepts[0].word_id) else {
+        return;
+    };
+    let Some(target_entry) = memory.state.lexicon.by_word_id(concepts[1].word_id) else {
+        return;
+    };
+    if source_entry.word_id == target_entry.word_id {
+        response
+            .reasoning
+            .push("Pertanyaan menunjuk konsep yang sama pada kedua posisi.".to_owned());
+        return;
+    }
+    let kind = if response
+        .analysis
+        .tokens
+        .iter()
+        .any(|token| token.surface == "sinonim")
+    {
+        SemanticRelationKind::Synonym
+    } else if response
+        .analysis
+        .tokens
+        .iter()
+        .any(|token| token.surface == "antonim")
+    {
+        SemanticRelationKind::Antonym
+    } else if response
+        .analysis
+        .tokens
+        .iter()
+        .any(|token| token.surface == "bagian")
+    {
+        SemanticRelationKind::PartOf
+    } else if response
+        .analysis
+        .tokens
+        .iter()
+        .any(|token| matches!(token.surface.as_str(), "jenis" | "termasuk"))
+    {
+        SemanticRelationKind::IsA
+    } else {
+        SemanticRelationKind::RelatedTo
+    };
+    let Ok(conclusions) = memory.infer(source_entry.word_id, kind) else {
+        return;
+    };
+    let Some((_, trace)) = conclusions
+        .into_iter()
+        .find(|(target, _)| *target == target_entry.word_id)
+    else {
+        response
+            .reasoning
+            .push("Tidak ditemukan edge yang mendukung relasi yang ditanyakan.".to_owned());
+        return;
+    };
+    if trace.contradicted {
+        response.answer = format!(
+            "Saya menemukan bukti yang bertentangan tentang relasi {}–{}; saya tidak dapat memastikan jawabannya.",
+            source_entry.headword, target_entry.headword
+        );
+        response.evidence_level = SemanticAnswerEvidence::ConflictingStatements;
+        response.confidence_band = SemanticConfidenceBand::Conflicted;
+        response.evidence_ids = trace.evidence_ids;
+        response
+            .reasoning
+            .push("Ada edge berlawanan yang memiliki status bukti non-hipotesis.".to_owned());
+        return;
+    }
+    if trace.status == AssertionStatus::Hypothesis || trace.confidence == Some(0.0) {
+        response.reasoning.push(
+            "Relasi hanya didukung hipotesis atau memiliki bobot bukti nol; tidak dipresentasikan sebagai fakta.".to_owned(),
+        );
+        return;
+    }
+    let Some(relation) = memory.state.relations.iter().find(|relation| {
+        trace
+            .evidence_ids
+            .contains(&relation.evidence.source_entry_id)
+    }) else {
+        return;
+    };
+    let label = relation_label(kind);
+    let attribution = if relation.evidence.source_entry_id.starts_with("synset:") {
+        "WordNet Bahasa"
+    } else {
+        "sumber yang tercatat"
+    };
+    response.answer = match kind {
+        SemanticRelationKind::Synonym => format!(
+            "Menurut {attribution}, “{}” dan “{}” tercatat sebagai sinonim.",
+            source_entry.headword, target_entry.headword
+        ),
+        SemanticRelationKind::Antonym => format!(
+            "Menurut {attribution}, “{}” dan “{}” tercatat sebagai antonim.",
+            source_entry.headword, target_entry.headword
+        ),
+        SemanticRelationKind::IsA => format!(
+            "Menurut {attribution}, {} termasuk jenis {}.",
+            source_entry.headword, target_entry.headword
+        ),
+        SemanticRelationKind::PartOf => format!(
+            "Menurut {attribution}, {} merupakan bagian dari {}.",
+            source_entry.headword, target_entry.headword
+        ),
+        SemanticRelationKind::Causes => format!(
+            "Menurut {attribution}, {} menyebabkan {}.",
+            source_entry.headword, target_entry.headword
+        ),
+        SemanticRelationKind::RelatedTo => format!(
+            "Menurut {attribution}, {} memiliki relasi dengan {}.",
+            source_entry.headword, target_entry.headword
+        ),
+    };
+    response.evidence_level = SemanticAnswerEvidence::DirectSource;
+    response.confidence_band = SemanticConfidenceBand::DirectSource;
+    response.evidence_ids = trace.evidence_ids.clone();
+    response.source_provenance.extend(
+        memory
+            .state
+            .lexicon
+            .relations()
+            .iter()
+            .filter(|relation| trace.evidence_ids.contains(&relation.source_entry_id))
+            .map(|relation| relation.source.clone()),
+    );
+    response.supporting_statements.push(format!(
+        "{} {} {} ({}).",
+        source_entry.headword, label, target_entry.headword, relation.evidence.source
+    ));
+    response.reasoning.push(format!(
+        "Relasi {} ditelusuri dari WordID {:?} ke WordID {:?} dengan status {:?}.",
+        label, source_entry.word_id, target_entry.word_id, trace.status
+    ));
+}
+
+fn role_has_unresolved_tokens(analysis: &SemanticAnalysis, kind: SemanticRoleKind) -> bool {
+    let Some(role) = analysis
+        .structure
+        .roles
+        .iter()
+        .find(|role| role.kind == kind)
+    else {
+        return false;
+    };
+    (role.token_start..role.token_end).any(|index| {
+        !is_question_filler(&analysis.tokens[index].surface)
+            && effective_word_id(analysis, index).is_none()
+    })
+}
+
+fn roles_match(
+    memory: &SemanticMemory,
+    left: &SemanticAnalysis,
+    right: &SemanticAnalysis,
+    kind: SemanticRoleKind,
+) -> bool {
+    let left_ids = role_word_ids(left, kind);
+    let right_ids = role_word_ids(right, kind);
+    if left_ids.is_empty() || right_ids.is_empty() {
+        return left_ids.is_empty() && right_ids.is_empty();
+    }
+    same_role_concepts(memory, &left_ids, &right_ids)
+}
+
+fn answer_from_context(memory: &SemanticMemory, context_id: &str, response: &mut SemanticResponse) {
+    let analysis = &response.analysis;
+    let has_unknown = analysis.tokens.iter().enumerate().any(|(index, token)| {
+        !is_question_filler(&token.surface) && effective_word_id(analysis, index).is_none()
+    });
+    if has_unknown
+        || [SemanticRoleKind::Subject, SemanticRoleKind::Predicate]
+            .into_iter()
+            .any(|kind| role_has_unresolved_tokens(analysis, kind))
+        || role_word_ids(analysis, SemanticRoleKind::Subject).is_empty()
+        || role_word_ids(analysis, SemanticRoleKind::Predicate).is_empty()
+    {
+        response.reasoning.push(
+            "Konsep atau salah satu peran peristiwa tidak dikenal; jawaban ya/tidak ditahan."
+                .to_owned(),
+        );
+        return;
+    }
+
+    let mut matching = Vec::new();
+    if let Some(sentences) = memory.state.contexts.get(context_id) {
+        for sentence in sentences.iter().filter(|sentence| !sentence.is_question) {
+            let statement = &sentence.analysis;
+            if statement.structure.negated.is_none()
+                || [SemanticRoleKind::Subject, SemanticRoleKind::Predicate]
+                    .into_iter()
+                    .any(|kind| role_has_unresolved_tokens(statement, kind))
+                || role_word_ids(statement, SemanticRoleKind::Subject).is_empty()
+                || role_word_ids(statement, SemanticRoleKind::Predicate).is_empty()
+            {
+                continue;
+            }
+            if roles_match(memory, analysis, statement, SemanticRoleKind::Subject)
+                && roles_match(memory, analysis, statement, SemanticRoleKind::Predicate)
+                && roles_match(memory, analysis, statement, SemanticRoleKind::Object)
+            {
+                matching.push((sentence, statement.structure.negated.unwrap_or(false)));
+            }
+        }
+    }
+    if matching.is_empty() {
+        response
+            .reasoning
+            .push("Tidak ada pernyataan deklaratif dengan subjek, predikat, objek, dan polaritas yang cocok di konteks ini.".to_owned());
+        return;
+    }
+    let query_negated = analysis.structure.negated.unwrap_or(false);
+    let supports_yes = matching
+        .iter()
+        .any(|(_, negated)| *negated == query_negated);
+    let supports_no = matching
+        .iter()
+        .any(|(_, negated)| *negated != query_negated);
+    response.supporting_statements = matching
+        .iter()
+        .map(|(sentence, _)| sentence.text.clone())
+        .collect();
+    response.evidence_ids = matching
+        .iter()
+        .map(|(sentence, _)| {
+            format!(
+                "context:{:x}",
+                Sha256::digest(
+                    format!(
+                        "{context_id}\0{}\0{}",
+                        sentence.recorded_at_unix, sentence.text
+                    )
+                    .as_bytes()
+                )
+            )
+        })
+        .collect();
+    if supports_yes && supports_no {
+        response.answer = "Konteks memuat pernyataan yang saling bertentangan, jadi saya belum dapat memastikan jawabannya.".to_owned();
+        response.evidence_level = SemanticAnswerEvidence::ConflictingStatements;
+        response.confidence_band = SemanticConfidenceBand::Conflicted;
+        response
+            .reasoning
+            .push("Frame peristiwa cocok, tetapi bukti mendukung polaritas berbeda.".to_owned());
+        return;
+    }
+    let answer_yes = supports_yes;
+    let statement = &matching[0].0.text;
+    response.answer = format!(
+        "{} Berdasarkan pernyataan dalam konteks: “{}”{}",
+        if answer_yes { "Ya." } else { "Tidak." },
+        statement,
+        if statement.ends_with(['.', '!', '?']) {
+            ""
+        } else {
+            "."
+        }
+    );
+    response.evidence_level = SemanticAnswerEvidence::ContextStatement;
+    response.confidence_band = SemanticConfidenceBand::ContextBound;
+    response
+        .reasoning
+        .push("Jawaban hanya merujuk pernyataan deklaratif dalam konteks tersimpan; ini bukan verifikasi dunia luar.".to_owned());
+}
+
+fn natural_list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [only] => only.clone(),
+        [first, second] => format!("{first} dan {second}"),
+        many => format!(
+            "{} dan {}",
+            many[..many.len() - 1].join(", "),
+            many[many.len() - 1]
+        ),
+    }
+}
+
+fn answer_open_question(
+    memory: &SemanticMemory,
+    context_id: &str,
+    response: &mut SemanticResponse,
+) {
+    let is_who_question = response
+        .analysis
+        .tokens
+        .first()
+        .is_some_and(|token| token.surface == "siapa");
+    if !is_who_question {
+        response.reasoning.push(
+            "Jenis pertanyaan terbuka ini belum memiliki slot jawaban yang dapat ditautkan dengan bukti.".to_owned(),
+        );
+        return;
+    }
+    let query = &response.analysis;
+    let has_unknown = query.tokens.iter().enumerate().any(|(index, token)| {
+        !is_question_filler(&token.surface) && effective_word_id(query, index).is_none()
+    });
+    if has_unknown || role_has_unresolved_tokens(query, SemanticRoleKind::Predicate) {
+        response.reasoning.push(
+            "Predikat atau konsep penting pada pertanyaan tidak dikenal; jawaban ditahan."
+                .to_owned(),
+        );
+        return;
+    }
+    let query_predicate = role_word_ids(query, SemanticRoleKind::Predicate);
+    let query_object = role_word_ids(query, SemanticRoleKind::Object);
+    if query_predicate.is_empty() {
+        response
+            .reasoning
+            .push("Pertanyaan tidak memiliki predikat yang bisa dicocokkan.".to_owned());
+        return;
+    }
+    let mut matching = Vec::new();
+    if let Some(sentences) = memory.state.contexts.get(context_id) {
+        for sentence in sentences.iter().filter(|sentence| !sentence.is_question) {
+            let statement = &sentence.analysis;
+            if statement.structure.negated != Some(false)
+                || role_has_unresolved_tokens(statement, SemanticRoleKind::Subject)
+                || role_has_unresolved_tokens(statement, SemanticRoleKind::Predicate)
+                || (!query_object.is_empty()
+                    && role_has_unresolved_tokens(statement, SemanticRoleKind::Object))
+            {
+                continue;
+            }
+            let predicate_matches = same_role_concepts(
+                memory,
+                &query_predicate,
+                &role_word_ids(statement, SemanticRoleKind::Predicate),
+            );
+            let object_matches = query_object.is_empty()
+                || same_role_concepts(
+                    memory,
+                    &query_object,
+                    &role_word_ids(statement, SemanticRoleKind::Object),
+                );
+            let subject = role_word_ids(statement, SemanticRoleKind::Subject);
+            if predicate_matches && object_matches && !subject.is_empty() {
+                matching.push((sentence, subject[0]));
+            }
+        }
+    }
+    let subjects = matching
+        .iter()
+        .map(|(_, subject)| *subject)
+        .collect::<BTreeSet<_>>();
+    if subjects.is_empty() {
+        response.reasoning.push(
+            "Tidak ditemukan pernyataan deklaratif positif yang mendukung jawaban untuk ‘siapa’."
+                .to_owned(),
+        );
+        return;
+    }
+    let names = subjects
+        .iter()
+        .filter_map(|id| memory.state.lexicon.by_word_id(*id))
+        .map(|entry| entry.headword.clone())
+        .collect::<Vec<_>>();
+    if names.len() != subjects.len() {
+        response
+            .reasoning
+            .push("Subjek bukti tidak dapat dipetakan ke lema aktif.".to_owned());
+        return;
+    }
+    let first_statement = &matching[0].0.text;
+    response.answer = format!(
+        "Dalam konteks, subjek yang sesuai adalah {}. Bukti: “{}”{}",
+        natural_list(&names),
+        first_statement,
+        if first_statement.ends_with(['.', '!', '?']) {
+            ""
+        } else {
+            "."
+        }
+    );
+    response.evidence_level = SemanticAnswerEvidence::ContextStatement;
+    response.confidence_band = SemanticConfidenceBand::ContextBound;
+    response.supporting_statements = matching
+        .iter()
+        .map(|(sentence, _)| sentence.text.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    response.evidence_ids = matching
+        .iter()
+        .map(|(sentence, _)| {
+            format!(
+                "context:{:x}",
+                Sha256::digest(
+                    format!(
+                        "{context_id}\0{}\0{}",
+                        sentence.recorded_at_unix, sentence.text
+                    )
+                    .as_bytes()
+                )
+            )
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    response.reasoning.push(
+        "Jawaban wh dibentuk dengan mencocokkan predikat dan objek pertanyaan terhadap frame positif di konteks yang sama; nama subjek diambil dari bukti.".to_owned(),
+    );
 }
 
 fn validate_state(state: &SemanticState) -> Result<(), SimError> {
@@ -1791,6 +2511,71 @@ fn trace_for(path: &[WordID], relations: &[ConceptRelation], contradicted: bool)
         confidence,
         contradicted,
     }
+}
+
+fn effective_word_id(analysis: &SemanticAnalysis, token_index: usize) -> Option<WordID> {
+    if let Some(resolution) = analysis
+        .context_resolutions
+        .iter()
+        .find(|resolution| resolution.token_index == token_index)
+    {
+        if let Some(resolved) = resolution.resolved_word_id {
+            return Some(resolved);
+        }
+        if !resolution.candidate_word_ids.is_empty() {
+            return None;
+        }
+    }
+    analysis
+        .tokens
+        .get(token_index)
+        .filter(|token| token.known)
+        .map(|token| token.word_id)
+}
+
+fn effective_word_ids(analysis: &SemanticAnalysis) -> Vec<(usize, WordID)> {
+    (0..analysis.tokens.len())
+        .filter_map(|index| effective_word_id(analysis, index).map(|word_id| (index, word_id)))
+        .collect()
+}
+
+fn role_word_ids(analysis: &SemanticAnalysis, kind: SemanticRoleKind) -> Vec<WordID> {
+    let Some(role) = analysis
+        .structure
+        .roles
+        .iter()
+        .find(|role| role.kind == kind)
+    else {
+        return Vec::new();
+    };
+    (role.token_start..role.token_end)
+        .filter_map(|index| effective_word_id(analysis, index))
+        .collect()
+}
+
+fn same_supported_concept(memory: &SemanticMemory, left: WordID, right: WordID) -> bool {
+    left == right
+        || (!memory.has_opposing_relation(left, right, SemanticRelationKind::Synonym)
+            && memory.state.relations.iter().any(|relation| {
+                relation.kind == SemanticRelationKind::Synonym
+                    && relation.evidence.status != AssertionStatus::Hypothesis
+                    && ((relation.source == left && relation.target == right)
+                        || (relation.source == right && relation.target == left))
+            }))
+}
+
+fn same_role_concepts(memory: &SemanticMemory, left: &[WordID], right: &[WordID]) -> bool {
+    !left.is_empty()
+        && !right.is_empty()
+        && left.iter().all(|left_id| {
+            right
+                .iter()
+                .any(|right_id| same_supported_concept(memory, *left_id, *right_id))
+        })
+        && right.iter().all(|right_id| {
+            left.iter()
+                .any(|left_id| same_supported_concept(memory, *left_id, *right_id))
+        })
 }
 
 fn role_surface(analysis: &SemanticAnalysis, kind: SemanticRoleKind) -> Option<String> {

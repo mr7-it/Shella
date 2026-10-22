@@ -27,7 +27,9 @@ pub use nusax::{
     NusaXSplit, NusaXWordPair,
 };
 pub use relations::{LexicalAnalysis, LexicalRelation, LexicalRelationType};
-pub use wordnet::{WordNetBahasaDataset, WordNetBahasaDefinition, WordNetBahasaMember};
+pub use wordnet::{
+    WordNetBahasaDataset, WordNetBahasaDefinition, WordNetBahasaImportReport, WordNetBahasaMember,
+};
 
 const LEXICON_SCHEMA_VERSION: u32 = 1;
 
@@ -344,6 +346,64 @@ impl IndonesianVocabulary {
             self.relations.push(relation);
         }
         self.validate()
+    }
+
+    pub(super) fn add_relations_batch(
+        &mut self,
+        relations: Vec<LexicalRelation>,
+        registry: &LicenseRegistry,
+    ) -> Result<(usize, usize), SimError> {
+        let mut staged = self.clone();
+        let mut added = 0;
+        let mut conflicts_skipped = 0;
+        for relation in relations {
+            registry.verify(&relation.dataset)?;
+            let is_dependency =
+                matches!(relation.relation_type, LexicalRelationType::Dependency(_));
+            if (!is_dependency && !registry.supports_semantic_relations(&relation.dataset)?)
+                || (!is_dependency
+                    && relation
+                        .source_word
+                        .is_none_or(|source| source == relation.target_word))
+                || relation
+                    .source_word
+                    .is_some_and(|source| staged.by_word_id(source).is_none())
+                || staged.by_word_id(relation.target_word).is_none()
+                || invalid_text_field(&relation.source_entry_id)
+            {
+                return Err(SimError::InvalidInput {
+                    parameter: "lexical_relation",
+                    reason: "relasi batch harus memakai sumber semantik terverifikasi dan dua kata berbeda",
+                });
+            }
+            let conflicts = staged.relations.iter().any(|existing| {
+                let same_pair = (existing.source_word == relation.source_word
+                    && existing.target_word == relation.target_word)
+                    || (existing.source_word == Some(relation.target_word)
+                        && existing.target_word
+                            == relation.source_word.unwrap_or(relation.target_word));
+                same_pair
+                    && matches!(
+                        (&existing.relation_type, &relation.relation_type),
+                        (LexicalRelationType::Synonym, LexicalRelationType::Antonym)
+                            | (LexicalRelationType::Antonym, LexicalRelationType::Synonym)
+                    )
+            });
+            if conflicts {
+                conflicts_skipped += 1;
+                continue;
+            }
+            if !staged.relations.contains(&relation) {
+                if !staged.datasets.contains(&relation.dataset) {
+                    staged.datasets.push(relation.dataset.clone());
+                }
+                staged.relations.push(relation);
+                added += 1;
+            }
+        }
+        staged.validate()?;
+        *self = staged;
+        Ok((added, conflicts_skipped))
     }
 
     #[must_use]

@@ -18,7 +18,7 @@ Indonesian-PUD (CC BY-SA 3.0), dataset NusaX (CC BY-SA 4.0), dan IndoSum
 (CC BY-SA 4.0); versi, ukuran, atribusi, scope, dan keterbatasan pemakaian
 dicatat dalam [inventaris dataset](./DATASET_BAHASA_INDONESIA.md). Loader
 memeriksa ukuran, Git blob SHA-1, dan SHA-256 yang dipin sebelum parsing. Semua
-59 file yang dibundel juga terdaftar dalam manifest integritas versi 1
+63 file yang dibundel juga terdaftar dalam manifest integritas versi 1
 [`data/language-integrity.json`](../data/language-integrity.json), yang mencatat
 ukuran, SHA-256, format, dan encoding. `DatasetIntegrityManifest::bundled()`
 dan `verify_directory("data/language")` memvalidasi file hilang, file ekstra,
@@ -37,10 +37,11 @@ ROUGE-1. Tidak satu pun dataset ini melatih model dengan sendirinya.
 
 UD Indonesian-GSD dan CSUI belum diaktifkan karena hak atas teks sumber belum
 terverifikasi terpisah dari lisensi anotasi; IndoNLI tidak memiliki lisensi
-dataset yang cukup jelas. WordNet Bahasa pada URL terdahulu juga tidak tersedia
-(404 saat diperiksa). Sumber-sumber yang tertahan ini tidak diberi provenance
-resmi dan tidak dipakai untuk mengklaim kemampuan inferensi, relasi semantik,
-atau pemahaman bahasa.
+dataset yang cukup jelas. WordNet Bahasa r24 tersedia pada revisi yang dipin dan
+lisensi MIT yang diverifikasi. Dataset itu hanya diimpor dengan label Y/O;
+relasi dihasilkan dari keanggotaan synset bersama untuk lema yang tidak ambigu.
+Sumber yang tetap tertahan tidak diberi provenance resmi dan tidak digunakan
+untuk mengklaim kemampuan inferensi atau pemahaman bahasa.
 
 Entry yang ditambahkan melalui `upsert`/`import_json` tetap wajib membawa nama
 sumber, URI entri, identitas lisensi, URI lisensi, dan ID asal entri. Validasi
@@ -106,8 +107,10 @@ ID entri asal, status `SourceAssertion`/`Fact`/`Hypothesis`, timestamp opsional,
 dan confidence opsional `0..=1`. API memvalidasi field dan ID, tetapi tidak
 mengautentikasi sumber caller; jangan menandai input sebagai fakta tanpa verifikasi
 aplikasi. Relasi leksikal yang tersedia pada lexicon diimpor dengan provenance
-asal dan tanpa confidence rekaan. WordNet Bahasa tidak diaktifkan, sehingga tidak
-ada graf relasi upstream yang diklaim tersedia secara default.
+asal dan tanpa confidence rekaan. WordNet Bahasa dapat diimpor melalui loader yang
+sama: hanya anggota Indonesia bermutu Y/O satu-token, dengan relasi dalam synset
+yang tidak ambigu dan bukti sumber. File membership tidak menyediakan graf relasi
+antar-synset; edge yang diimpor hanya menyatakan keanggotaan pada synset yang sama.
 
 `analyze` memakai POS/lemma yang terdaftar untuk memilih verba pertama sebagai
 predikat, token sebelum predikat sebagai subjek/pelaku, token sesudahnya sebagai
@@ -120,9 +123,10 @@ tetap diberi label heuristik. Ini bukan parser dependency atau coreference umum.
 
 `analyze_in_context` menyimpan paling banyak 128 kalimat per ID konteks.
 `retrieve` memberi skor berbasis WordID yang sama atau satu edge relasi langsung
-dengan confidence; edge hipotesis diberi bobot lebih rendah. Kecocokan ID atau
-relasi wajib ada sebelum bonus konteks dapat berlaku. Nilai relevansi adalah skor
-urut heuristik, bukan probabilitas. `infer` menelusuri edge `is-a`/`bagian-dari`
+yang memiliki confidence tercatat atau status non-hipotesis; `SourceAssertion`
+tanpa confidence dapat membantu ranking, tetapi skornya tetap heuristik, bukan
+confidence probabilistik. Kecocokan ID atau relasi wajib ada sebelum bonus konteks
+dapat berlaku. `infer` menelusuri edge `is-a`/`bagian-dari`
 secara transitif dan sinonim dua arah; trace mengembalikan path, ID bukti, status,
 produk confidence bila semua edge memilikinya, dan indikator konflik sinonim /
 antonim. Ia tidak menyimpulkan sebab-akibat yang belum tercatat.
@@ -136,6 +140,64 @@ memasang store yang sama untuk `reason_text`; `learn_from_semantic_feedback`
 menyimpan analisis konteks, melaporkan gap, membentuk currents semantic, menulis
 feedback ke `LearningMemory`, dan memperbarui readout LIF/STDP aktual. Experience
 tetap disimpan sebagai fitur currents/neural, bukan record token atau teks mentah.
+
+`SemanticMemory::respond_in_context(context_id, text, retrieval_limit)` menjalankan
+analisis token/role, resolusi satu-langkah pada konteks, retrieval, pencocokan frame,
+policy evidence/kontradiksi, lalu realisasi jawaban. `SemanticResponse` memuat intent,
+kategori evidence, alasan, gap, kutipan konteks, ID bukti, dan provenance/lisensi.
+Definisi memerlukan `definition_source_entry_id` yang cocok dengan source record;
+relasi memakai trace `infer` dan tidak dipromosikan ke jawaban fakta bila trace masih
+`Hypothesis` atau confidence eksplisitnya nol. Sinonim untuk frame/retrieval harus
+memiliki status non-hipotesis. Jawaban ya/tidak membandingkan subjek, predikat, objek,
+polaritas negasi, dan seluruh pernyataan deklaratif pada konteks yang sama; hanya
+overlap kata atau pertukaran subjek/objek tidak cukup. Relasi sinonim WordNet r24
+tanpa confidence dapat menjadi bukti sumber untuk kecocokan leksikal, tetapi tidak
+menciptakan nilai confidence.
+
+Pertanyaan `Siapa yang ...?` dapat dijawab bila predikat (dan objek bila disebut)
+cocok dengan pernyataan positif pada konteks yang sama; nama subjek dan supporting
+statement diambil dari konteks. Bentuk WH lain, pertanyaan sebab, sintaksis inversi,
+dan banyak paraphrase belum diimplementasikan dan akan abstain. Pertanyaan tidak
+menjadi evidence untuk dirinya sendiri. Konteks bukan verifikasi fakta dunia luar.
+`confidence_band` adalah kelas evidence, bukan skor probabilistik atau kalibrasi.
+Perakitan kalimat tetap deterministik, bukan LLM atau generator bebas.
+
+Loader WordNet r24 memetakan POS suffix synset ke UPOS hanya jika lema menunjuk tepat
+satu synset dan tidak memiliki anotasi POS yang sudah ada; ini memberi `is_noun` /
+`is_verb` dasar tanpa menebak untuk lema polisemik. Impor revision tes ke lexicon
+kosong memberi POS pada **4.589** entry. Definisi hanya dipasang ketika
+lema juga unik dan tidak ada konflik; gloss membawa `source_entry_id` serta provenance
+sumber/lisensi. Pada snapshot tes, 1.345 entry menerima gloss yang lolos
+aturan tersebut dari 12.668 baris definisi yang diparse. Contoh holdout “Apa arti
+heterotrof?” dijawab dari gloss upstream. Keberadaan gloss yang diimpor bukan bukti
+neural learning.
+
+`ReasoningEngine::respond_text` mengorkestrasi response semantic dan `reason_text`:
+input dipakai untuk jawaban berbukti, di-encode oleh `LanguageNetwork`, lalu melewati
+recall `LearningMemory` dan transisi LIF. Hasil `ReasoningResult` saat ini adalah
+prediksi aksi/ketidakpastian untuk task caller; tanpa mapping eksplisit dari aksi ke
+proposisi, ia tidak dijadikan sumber fakta atau diubah menjadi kalimat jawaban.
+Semantic response tetap hanya mengklaim isi yang didukung `SemanticMemory`. SDK menyediakan delegasi
+`Session::respond_with_reasoning` dan `Session::learn_from_semantic_feedback`; caller
+memasok `ReasoningEngine` dan `LanguageNetwork` dengan identitas neuron cocok.
+Pembelajaran hanya terjadi bila caller memberikan expected/predicted action melalui
+feedback API. Gap token unknown, ambigu, atau konflik menghentikan jalur belajar
+semantic tanpa update. Memuat WordNet sendiri tidak melatih jaringan.
+
+Tes respons terpisah pada fixture lokal melaporkan: intent **5/5**, factuality
+terhadap evidence berlabel **5/5**, reasoning/negasi/kontradiksi/abstention **5/5**,
+kriteria bentuk kalimat **6/6**, dan satu phrasing holdout **1/1**. Ini sampel kecil
+yang ditulis untuk tes, bukan estimasi akurasi populasi. Regression test tambahan
+mencakup pembalikan role, predicate mismatch, synonym edge berstatus source assertion,
+resolusi satu pronomina, pertanyaan who, dan kontradiksi dengan retrieval limit 1.
+Tes upstream terpisah juga meminta sinonim dari pasangan noun yang sungguh diimpor dari
+WordNet dan memeriksa evidence ID/provenance MIT. Ini kontrak terbatas, bukan estimasi
+akurasi populasi. Benchmark polaritas 100 contoh di bawah mengukur task terstruktur
+yang berbeda. Holdout WH terpisah memakai pertanyaan alami `Siapa yang makan ikan?`
+yang tidak pernah disimpan sebagai fakta: baseline tanpa konteks **0/1**, setelah
+pernyataan `Kucing makan ikan.` ditambahkan lewat `analyze_in_context` menjadi **1/1**.
+Ini mengukur retrieval jawaban dari input konteks, bukan peningkatan neural melalui
+feedback; pertanyaan baseline dan pertanyaan evaluasi juga dipisahkan ke context ID.
 
 Penghapusan konsep pada `ReasoningEngine::remove_semantic_concept` menjurnal task
 konteks terkait di semantic store, lalu menghapus experience task itu dan context

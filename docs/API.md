@@ -105,7 +105,7 @@ use shella::DatasetIntegrityManifest;
 
 let manifest = DatasetIntegrityManifest::bundled()?;
 let report = manifest.verify_directory("data/language")?;
-assert_eq!(report.files_verified, 59);
+assert_eq!(report.files_verified, 63);
 # Ok::<(), shella::SimError>(())
 ```
 
@@ -122,13 +122,13 @@ Untuk pembelajaran jangka panjang, `LearningMemory::open(path)` memulihkan penga
 
 `IndonesianVocabulary` menyediakan wadah lexicon terversi dan tervalidasi.
 `LicenseRegistry::verified_sources()` mengizinkan stopwords-id, UD Indonesian-PUD,
-NusaX, IndoSum, dan Hunspell terdahulu hanya pada revisi/hash yang tercatat. Data
-stopwords, PUD, NusaX, dan IndoSum yang berlisensi dipisahkan di
-`data/language/`. GSD/CSUI tetap tidak aktif karena hak teks sumber belum
-dipastikan; IndoNLI tidak memiliki lisensi dataset yang terverifikasi; WordNet
-Bahasa pada URL terdahulu tidak tersedia. Lihat
-[`docs/DATASET_BAHASA_INDONESIA.md`](./DATASET_BAHASA_INDONESIA.md) untuk status,
-ukuran, sumber, serta batas penggunaan masing-masing.
+WordNet Bahasa, NusaX, IndoSum, dan Hunspell hanya pada revisi/hash yang tercatat.
+WordNet Bahasa r24 menggunakan MIT. Impornya hanya menerima label mutu Y/O dan
+menghubungkan pasangan lema dengan synset yang sama ketika pemetaan lema tidak
+ambigu; lihat [`docs/DATASET_BAHASA_INDONESIA.md`](./DATASET_BAHASA_INDONESIA.md)
+untuk identitas, jumlah, dan batas cakupan data. GSD/CSUI tetap tidak aktif karena
+hak teks sumber belum dipastikan; IndoNLI tidak memiliki lisensi dataset yang
+terverifikasi.
 
 ```rust
 use shella::{
@@ -231,6 +231,48 @@ Fitur reasoning tambahan:
 - `save_checkpoint`/`restore_checkpoint(path, learning_memory)` menyimpan state
   reasoning, context, konfigurasi, kalibrator beserta provenance dan metrik. Memory
   tetap file terpisah; restore memeriksa fingerprint record agar mismatch ditolak.
+
+Untuk input bahasa, `ReasoningEngine::respond_text(context_id, text,
+language_network, current_per_word_na, action_neurons, retrieval_limit)` menjalankan
+respons deterministik dari `SemanticMemory` dan inference LIF/retrieval melalui
+engine yang sama. Response menyertakan `SemanticQuestionIntent`, evidence class,
+gap report, statement yang mendukung, ID sumber, dan provenance/license bila edge
+atau gloss berasal dari dataset. Definisi memakai gloss yang dikaitkan ke source
+record; relasi memakai trace `infer` dan menolak trace berstatus `Hypothesis` atau
+confidence eksplisit nol sebagai fakta. Pertanyaan ya/tidak dicocokkan dengan frame
+subjek/predikat/objek dan negasi pada konteks yang sama; sinonim source assertion
+non-hipotesis dapat dipakai sebagai kecocokan konsep tanpa diperlakukan sebagai
+confidence terkalibrasi. `Siapa yang ...?` menjawab dari frame positif yang cocok;
+bentuk WH lain abstain. Pertanyaan tersimpan tidak boleh menjadi evidence. Bila
+konsep ambigu/tidak dikenal, bukti tidak ada, atau sumber bertentangan, response
+abstain atau melaporkan konflik. `SemanticConfidenceBand` bukan probabilitas.
+Perakitan kalimat masih deterministik dan terbatas, bukan generator neural/LLM.
+`ReasoningResult` tetap prediction/action-level; tanpa mapping eksplisit action-label
+ke proposition, ia tidak digunakan sebagai sumber fakta pada jawaban. Detail intent
+dan batas teruji ada di [`docs/BAHASA.md`](./BAHASA.md).
+
+SDK memaparkan delegasi tipis pada `Session::respond_with_reasoning`:
+
+```rust
+let (response, reasoning_result) = session.respond_with_reasoning(
+    &mut reasoning_engine,
+    "dialog-1",
+    "Apakah kucing makan ikan?",
+    &language_network,
+    20.0,
+    &[action_neuron],
+    8,
+)?;
+```
+
+`ReasoningEngine` tetap pemilik authoritative `SemanticMemory` dan `LearningMemory`;
+caller juga memberi `LanguageNetwork` dengan `WordID`, vocabulary, serta identitas
+neuron yang cocok. API lama `Session::step` tidak berubah. Pembelajaran berjalan
+hanya melalui feedback eksplisit, misalnya
+`Session::learn_from_semantic_feedback(reasoning_engine, context_id, text,
+language_network, current_per_word_na, expected_action, predicted_action,
+action_neurons, learning_rate)`. Input dengan token unknown, ambiguitas, atau
+konflik tidak memperbarui readout/STDP atau menulis pengalaman learning.
 
 Gunakan `fit_confidence_calibration_with_ids` dengan `CalibrationSample` untuk
 memastikan ID unik dan split validation/evaluation tidak overlap. API lama tanpa ID

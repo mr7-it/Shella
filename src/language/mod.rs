@@ -1,4 +1,4 @@
-//! Pipeline representasi tekstual lokal; tidak melakukan pemahaman atau generasi bahasa.
+//! Pipeline bahasa lokal dengan analisis semantik dan respons konservatif berbukti.
 mod encoder;
 mod indonesian;
 mod network;
@@ -17,15 +17,16 @@ pub use indonesian::{
     LinguisticMetadata, NusaXLexicon, NusaXLexiconEntry, NusaXParallelCorpus,
     NusaXParallelSentence, NusaXSentimentCorpus, NusaXSentimentExample, NusaXSentimentLabel,
     NusaXSentimentMetrics, NusaXSplit, NusaXWordPair, SourceProvenance, StopwordSet,
-    WordNetBahasaDataset, WordNetBahasaDefinition, WordNetBahasaMember,
+    WordNetBahasaDataset, WordNetBahasaDefinition, WordNetBahasaImportReport, WordNetBahasaMember,
 };
 pub use network::{LanguageNetwork, LexicalConnection};
 pub use normalization::normalize_text;
 pub use semantic::{
     AssertionStatus, ConceptRelation, ContextResolution, EvidenceLevel, GroupedSemanticExample,
-    InferenceTrace, PhraseEntry, PhraseKind, PhraseMatch, SemanticAnalysis, SemanticEncoding,
-    SemanticEvaluationReport, SemanticEvidence, SemanticExample, SemanticGapReport, SemanticMemory,
-    SemanticRecall, SemanticRelationKind, SemanticResonance, SemanticRole, SemanticRoleKind,
+    InferenceTrace, PhraseEntry, PhraseKind, PhraseMatch, SemanticAnalysis, SemanticAnswerEvidence,
+    SemanticConfidenceBand, SemanticEncoding, SemanticEvaluationReport, SemanticEvidence,
+    SemanticExample, SemanticGapReport, SemanticMemory, SemanticQuestionIntent, SemanticRecall,
+    SemanticRelationKind, SemanticResonance, SemanticResponse, SemanticRole, SemanticRoleKind,
     SemanticSplitMetrics, SemanticToken, SentenceStructure, TokenAmbiguity, TokenSpan,
 };
 pub use tokenizer::tokenize;

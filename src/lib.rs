@@ -2,9 +2,9 @@
 //!
 //! Crate menyediakan runtime/neuron LIF, jaringan sinkron, STDP reward-modulated,
 //! evaluator dan benchmark, checkpoint tervalidasi, memori file-backed, decision
-//! scoring deterministik, preprocessing teks dasar, serta SDK input/output.
-//! Pipeline teks dan decision engine transparan tetapi tidak mengklaim pemahaman
-//! bahasa atau confidence probabilistik.
+//! scoring deterministik, preprocessing teks, analisis semantik, respons berbukti,
+//! serta SDK input/output. Analisis/intent menggunakan aturan eksplisit; confidence
+//! semantic bersifat ordinal, bukan probabilistik atau pemahaman bahasa umum.
 
 pub mod benchmark;
 pub mod checkpoint;
@@ -69,9 +69,10 @@ pub use language::{
     LinguisticMetadata, NusaXLexicon, NusaXLexiconEntry, NusaXParallelCorpus,
     NusaXParallelSentence, NusaXSentimentCorpus, NusaXSentimentExample, NusaXSentimentLabel,
     NusaXSentimentMetrics, NusaXSplit, NusaXWordPair, PhraseEntry, PhraseKind, PhraseMatch,
-    SemanticAnalysis, SemanticEncoding, SemanticEvaluationReport, SemanticEvidence,
-    SemanticExample, SemanticGapReport, SemanticMemory, SemanticRecall, SemanticRelationKind,
-    SemanticResonance, SemanticRole, SemanticRoleKind, SemanticSplitMetrics, SemanticToken,
+    SemanticAnalysis, SemanticAnswerEvidence, SemanticConfidenceBand, SemanticEncoding,
+    SemanticEvaluationReport, SemanticEvidence, SemanticExample, SemanticGapReport, SemanticMemory,
+    SemanticQuestionIntent, SemanticRecall, SemanticRelationKind, SemanticResonance,
+    SemanticResponse, SemanticRole, SemanticRoleKind, SemanticSplitMetrics, SemanticToken,
     SentenceStructure, SourceProvenance, StopwordSet, TextEncoder, TokenAmbiguity, TokenSpan,
     Vocabulary, normalize_text, tokenize,
 };

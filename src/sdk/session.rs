@@ -1,9 +1,10 @@
 use super::{Engine, Input, Output};
 use crate::{
-    SimError,
+    LanguageNetwork, ReasoningEngine, ReasoningResult, SemanticLearningOutcome, SimError,
     decision::{Candidate, Decision},
     evaluator::{RewardEvaluation, RewardEvaluator},
-    language::{EncodedText, LanguageNetwork, SemanticAnalysis, SemanticResonance},
+    language::SemanticResponse,
+    language::{EncodedText, SemanticAnalysis, SemanticResonance},
 };
 use serde_json::Value;
 use std::path::Path;
@@ -13,6 +14,55 @@ pub struct Session<'a> {
     pub(crate) engine: &'a mut Engine,
 }
 impl Session<'_> {
+    /// Menjalankan input bahasa melalui semantic response dan ReasoningEngine.
+    /// `ReasoningEngine` tetap menjadi pemilik tunggal SemanticMemory/LearningMemory.
+    #[allow(clippy::too_many_arguments)]
+    pub fn respond_with_reasoning(
+        &mut self,
+        reasoning: &mut ReasoningEngine,
+        context_id: &str,
+        text: &str,
+        language_network: &LanguageNetwork,
+        current_per_word_na: f64,
+        action_neurons: &[usize],
+        retrieval_limit: usize,
+    ) -> Result<(SemanticResponse, ReasoningResult), SimError> {
+        reasoning.respond_text(
+            context_id,
+            text,
+            language_network,
+            current_per_word_na,
+            action_neurons,
+            retrieval_limit,
+        )
+    }
+
+    /// Menerapkan supervised feedback melalui jalur semantik dan LearningMemory.
+    #[allow(clippy::too_many_arguments)]
+    pub fn learn_from_semantic_feedback(
+        &mut self,
+        reasoning: &mut ReasoningEngine,
+        context_id: &str,
+        text: &str,
+        language_network: &LanguageNetwork,
+        current_per_word_na: f64,
+        expected_action: Option<usize>,
+        predicted_action: Option<usize>,
+        action_neurons: &[usize],
+        learning_rate: f64,
+    ) -> Result<SemanticLearningOutcome, SimError> {
+        reasoning.learn_from_semantic_feedback(
+            context_id,
+            text,
+            language_network,
+            current_per_word_na,
+            expected_action,
+            predicted_action,
+            action_neurons,
+            learning_rate,
+        )
+    }
+
     /// Memproses arus/teks melalui jaringan LIF dan mengembalikan spike yang dihasilkan.
     pub fn step(&mut self, input: Input) -> Result<Output, SimError> {
         let (kind, currents, encoded): (_, Vec<f64>, Option<EncodedText>) = match input {

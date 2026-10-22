@@ -25,8 +25,8 @@ fn bundled_integrity_manifest_verifies_every_dataset_file_and_format() {
     let report = manifest
         .verify_directory("data/language")
         .expect("all pinned files verify");
-    assert_eq!(manifest.files.len(), 59);
-    assert_eq!(report.files_verified, 59);
+    assert_eq!(manifest.files.len(), 63);
+    assert_eq!(report.files_verified, 63);
     assert!(report.total_bytes > 90_000_000);
 }
 

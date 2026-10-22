@@ -3,10 +3,54 @@ use super::temporal::calculate_attention;
 use super::validation::validate_reasoning_input;
 use super::{ReasoningEngine, ReasoningResult, ReasoningStep};
 use crate::reasoning::{ContextFrame, UncertaintyDecomposition};
-use crate::{LanguageNetwork, SimError};
+use crate::{LanguageNetwork, SimError, language::SemanticResponse};
 use std::collections::BTreeSet;
 
 impl ReasoningEngine {
+    /// Menghasilkan respons semantik berbukti dan menjalankan inference pada
+    /// jaringan yang sama melalui pipeline retrieval/LIF yang sudah ada.
+    pub fn respond_text(
+        &mut self,
+        context_id: &str,
+        text: &str,
+        language_network: &LanguageNetwork,
+        current_per_word_na: f64,
+        action_neurons: &[usize],
+        retrieval_limit: usize,
+    ) -> Result<(SemanticResponse, ReasoningResult), SimError> {
+        self.synchronize_persistent_memories()?;
+        if self.network.neuron_count() != language_network.network().neuron_count()
+            || (0..self.network.neuron_count()).any(|index| {
+                self.network.neuron_id(index) != language_network.network().neuron_id(index)
+            })
+        {
+            return Err(SimError::InvalidInput {
+                parameter: "language_network",
+                reason: "identitas/populasi neuron tidak cocok dengan reasoning engine",
+            });
+        }
+        let currents = self
+            .semantic_memory
+            .as_ref()
+            .ok_or(SimError::InvalidInput {
+                parameter: "semantic_memory",
+                reason: "ReasoningEngine belum memasang SemanticMemory",
+            })?
+            .encode_currents(language_network, text, current_per_word_na)?
+            .currents_na;
+        validate_reasoning_input(&self.network, &currents, action_neurons)?;
+        let response = self
+            .semantic_memory
+            .as_mut()
+            .ok_or(SimError::InvalidInput {
+                parameter: "semantic_memory",
+                reason: "ReasoningEngine belum memasang SemanticMemory",
+            })?
+            .respond_in_context(context_id, text, retrieval_limit)?;
+        let reasoning = self.reason(context_id, &currents, action_neurons)?;
+        Ok((response, reasoning))
+    }
+
     /// Mengambil pengalaman sesuai konteks, menyuntikkan dukungan memori, lalu
     /// menjalankan jaringan selama konfigurasi iterasi yang diberikan.
     pub fn reason(

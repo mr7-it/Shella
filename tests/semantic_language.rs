@@ -3,8 +3,9 @@ use shella::{
     AssertionStatus, ConceptRelation, DatasetId, Engine, GroupedSemanticExample,
     IndonesianVocabulary, LearningMemory, LexicalAnalysis, LexiconEntryInput, LexiconMetadata,
     LicenseRegistry, LifConfig, LifNetwork, LinguisticMetadata, MemoryStore, PhraseKind,
-    ReasoningConfig, ReasoningEngine, SemanticEvidence, SemanticExample, SemanticGapReport,
-    SemanticMemory, SemanticRelationKind, SemanticRoleKind, SourceProvenance, Synapse,
+    ReasoningConfig, ReasoningEngine, SemanticAnswerEvidence, SemanticConfidenceBand,
+    SemanticEvidence, SemanticExample, SemanticGapReport, SemanticMemory, SemanticQuestionIntent,
+    SemanticRelationKind, SemanticRoleKind, SourceProvenance, Synapse,
 };
 use std::{
     collections::BTreeMap,
@@ -898,6 +899,349 @@ fn penghapusan_konsep_menyinkronkan_pengalaman_neural_dan_context_window() {
 }
 
 #[test]
+fn sdk_response_jalankan_reasoning_dan_semantic_feedback_ke_learning_memory() {
+    let semantic_path = memory_path();
+    let learning_path = memory_path();
+    let vocabulary = lexicon();
+    let network = LifNetwork::new(LifConfig::new(1.0, 10.0, 1.0, -65.0, -70.0, -60.0, 1), 64)
+        .expect("LIF network");
+    let mut language = vocabulary
+        .to_language_network(network.clone())
+        .expect("same Indonesian vocabulary");
+    for entry in vocabulary.entries() {
+        let index = usize::try_from(entry.word_id.get()).expect("WordID fits index");
+        let neuron = language
+            .network()
+            .neuron_id(index)
+            .expect("neuron for WordID");
+        language
+            .bind_word(entry.word_id, &[neuron])
+            .expect("bind word");
+    }
+    let mut semantic =
+        SemanticMemory::open(&semantic_path, vocabulary.clone()).expect("semantic store");
+    semantic
+        .analyze_in_context("dialog", "Kucing makan ikan.")
+        .expect("declarative context");
+    let learning = LearningMemory::open(&learning_path).expect("learning memory");
+    let mut reasoning = ReasoningEngine::new(
+        network.clone(),
+        learning,
+        ReasoningConfig::new(2, 4, 0.0, 0.0, 0.0).unwrap(),
+    )
+    .with_semantic_memory(semantic);
+    let mut sdk = Engine::new(network);
+    {
+        let mut session = sdk.session();
+        let (answer, inference) = session
+            .respond_with_reasoning(
+                &mut reasoning,
+                "dialog",
+                "Apakah kucing makan ikan?",
+                &language,
+                50.0,
+                &[63],
+                4,
+            )
+            .expect("SDK delegates to evidence response and reasoning inference");
+        assert_eq!(
+            answer.evidence_level,
+            SemanticAnswerEvidence::ContextStatement
+        );
+        assert!(answer.answer.starts_with("Ya."));
+        assert_eq!(inference.steps().len(), 2);
+        let learning = session
+            .learn_from_semantic_feedback(
+                &mut reasoning,
+                "polaritas",
+                "Kucing makan ikan.",
+                &language,
+                50.0,
+                Some(0),
+                None,
+                &[63],
+                0.001,
+            )
+            .expect("explicit teacher feedback only");
+        assert!(learning.learning().is_some());
+    }
+    assert_eq!(reasoning.memory().len(), 1);
+    drop(reasoning);
+    drop(language);
+    cleanup(&semantic_path);
+    cleanup(&learning_path);
+}
+
+#[test]
+fn semantic_responses_evaluated_separately_for_intent_facts_reasoning_fluency_and_holdout() {
+    let path = memory_path();
+    let vocabulary = lexicon();
+    let cat = vocabulary.lookup("kucing").unwrap().unwrap().word_id;
+    let mammal = vocabulary.lookup("mamalia").unwrap().unwrap().word_id;
+    let mut semantic = SemanticMemory::open(&path, vocabulary).unwrap();
+    let mut is_a = concept_relation(
+        cat,
+        mammal,
+        SemanticRelationKind::IsA,
+        "fixture:cat-is-mammal",
+    );
+    is_a.evidence.status = AssertionStatus::Fact;
+    semantic.add_relation(is_a).expect("relation edge accepted");
+    semantic
+        .analyze_in_context("dialog-a", "Kucing makan ikan.")
+        .expect("declarative training context");
+    semantic
+        .analyze_in_context("dialog-a", "Kucing tidak makan nasi.")
+        .expect("negated declarative context");
+
+    let relation = semantic
+        .respond_in_context("dialog-a", "Apakah kucing termasuk mamalia?", 8)
+        .expect("relation query");
+    let positive = semantic
+        .respond_in_context("dialog-a", "Apakah kucing makan ikan?", 8)
+        .expect("positive context query");
+    let negated = semantic
+        .respond_in_context("dialog-a", "Benarkah kucing tidak makan nasi?", 8)
+        .expect("negated context query");
+    let unsupported = semantic
+        .respond_in_context("dialog-a", "Apakah kucing berenang?", 8)
+        .expect("unsupported question abstains");
+    let ambiguous = semantic
+        .respond_in_context("dialog-a", "Apa arti bisa?", 8)
+        .expect("ambiguous lemma abstains");
+
+    let understanding_cases = [
+        relation.intent == SemanticQuestionIntent::Relation,
+        positive.intent == SemanticQuestionIntent::YesNo,
+        negated.intent == SemanticQuestionIntent::YesNo,
+        ambiguous.intent == SemanticQuestionIntent::Definition,
+        unsupported.intent == SemanticQuestionIntent::YesNo,
+    ];
+    let understanding_correct = understanding_cases.iter().filter(|case| **case).count();
+    assert_eq!(understanding_correct, understanding_cases.len());
+
+    let factual_cases = [
+        relation.evidence_level == SemanticAnswerEvidence::DirectSource
+            && relation
+                .evidence_ids
+                .contains(&"fixture:cat-is-mammal".to_owned()),
+        positive.evidence_level == SemanticAnswerEvidence::ContextStatement
+            && positive.answer.starts_with("Ya."),
+        negated.evidence_level == SemanticAnswerEvidence::ContextStatement
+            && negated.answer.starts_with("Ya."),
+        unsupported.evidence_level == SemanticAnswerEvidence::Insufficient,
+        ambiguous.evidence_level == SemanticAnswerEvidence::Insufficient,
+    ];
+    let factual_correct = factual_cases.iter().filter(|case| **case).count();
+    assert_eq!(factual_correct, factual_cases.len());
+
+    semantic
+        .analyze_in_context("conflict", "Kucing makan ikan.")
+        .unwrap();
+    semantic
+        .analyze_in_context("conflict", "Kucing tidak makan ikan.")
+        .unwrap();
+    let contradiction = semantic
+        .respond_in_context("conflict", "Apakah kucing makan ikan?", 8)
+        .unwrap();
+    let reasoning_cases = [
+        positive.answer.starts_with("Ya."),
+        negated.answer.starts_with("Ya."),
+        contradiction.evidence_level == SemanticAnswerEvidence::ConflictingStatements,
+        unsupported.evidence_level == SemanticAnswerEvidence::Insufficient,
+        ambiguous.confidence_band == SemanticConfidenceBand::Insufficient,
+    ];
+    let reasoning_correct = reasoning_cases.iter().filter(|case| **case).count();
+    assert_eq!(reasoning_correct, reasoning_cases.len());
+
+    semantic
+        .analyze_in_context("question-only", "Kucing makan ikan?")
+        .unwrap();
+    let question_only = semantic
+        .respond_in_context("question-only", "Apakah kucing makan ikan?", 8)
+        .unwrap();
+    assert!(question_only.retrieved_context.is_empty());
+    assert_eq!(
+        question_only.evidence_level,
+        SemanticAnswerEvidence::Insufficient
+    );
+
+    let responses = [
+        &relation,
+        &positive,
+        &negated,
+        &unsupported,
+        &ambiguous,
+        &contradiction,
+    ];
+    let fluent = responses
+        .iter()
+        .filter(|response| {
+            !response.answer.trim().is_empty()
+                && response.answer.chars().count() >= 20
+                && (response.answer.ends_with(['.', '?']) || response.answer.ends_with('”'))
+        })
+        .count();
+    assert_eq!(fluent, responses.len());
+
+    // New phrasing is evaluated after training statements and never inserted as evidence first.
+    let holdout_query = semantic
+        .respond_in_context("dialog-a", "Benarkah kucing tidur?", 8)
+        .unwrap();
+    let generalization_correct = usize::from(
+        holdout_query.intent == SemanticQuestionIntent::YesNo
+            && holdout_query.evidence_level == SemanticAnswerEvidence::Insufficient,
+    );
+    assert_eq!(generalization_correct, 1);
+    println!(
+        "semantic response holdout: understanding={understanding_correct}/{}, factuality={factual_correct}/{}, reasoning={reasoning_correct}/{}, sentence_quality={fluent}/{}, generalization={generalization_correct}/1",
+        understanding_cases.len(),
+        factual_cases.len(),
+        reasoning_cases.len(),
+        responses.len(),
+    );
+
+    drop(semantic);
+    cleanup(&path);
+}
+
+#[test]
+fn respons_mencocokkan_frame_semantik_sinonim_dan_referen_konteks() {
+    let path = memory_path();
+    let vocabulary = lexicon();
+    let cat = vocabulary.lookup("kucing").unwrap().unwrap().word_id;
+    let synonym = vocabulary.lookup("meong").unwrap().unwrap().word_id;
+    let mut semantic = SemanticMemory::open(&path, vocabulary).unwrap();
+
+    let mut synonym_edge = concept_relation(
+        cat,
+        synonym,
+        SemanticRelationKind::Synonym,
+        "fixture:supported-synonym",
+    );
+    synonym_edge.evidence.status = AssertionStatus::SourceAssertion;
+    synonym_edge.evidence.confidence = None;
+    semantic.add_relation(synonym_edge).unwrap();
+
+    let mammal = semantic
+        .lexicon()
+        .lookup("mamalia")
+        .unwrap()
+        .unwrap()
+        .word_id;
+    semantic
+        .add_relation(concept_relation(
+            cat,
+            mammal,
+            SemanticRelationKind::IsA,
+            "fixture:unverified-hypothesis",
+        ))
+        .unwrap();
+    let hypothesis = semantic
+        .respond_in_context("hypothesis", "Apakah kucing termasuk mamalia?", 4)
+        .unwrap();
+    assert_eq!(
+        hypothesis.evidence_level,
+        SemanticAnswerEvidence::Insufficient
+    );
+
+    semantic
+        .analyze_in_context("role-swap", "Kucing makan ikan.")
+        .unwrap();
+    let swapped = semantic
+        .respond_in_context("role-swap", "Apakah ikan makan kucing?", 8)
+        .unwrap();
+    assert_eq!(swapped.evidence_level, SemanticAnswerEvidence::Insufficient);
+
+    semantic
+        .analyze_in_context("verb-object", "Kucing makan ikan.")
+        .unwrap();
+    let wrong_predicate = semantic
+        .respond_in_context("verb-object", "Apakah kucing tidur ikan?", 8)
+        .unwrap();
+    assert_eq!(
+        wrong_predicate.evidence_level,
+        SemanticAnswerEvidence::Insufficient
+    );
+    let synonym_query = semantic
+        .respond_in_context("verb-object", "Apakah meong makan ikan?", 8)
+        .unwrap();
+    assert_eq!(
+        synonym_query.evidence_level,
+        SemanticAnswerEvidence::ContextStatement
+    );
+    assert!(synonym_query.answer.starts_with("Ya."));
+
+    semantic
+        .analyze_in_context("pronoun", "Kucing makan nasi.")
+        .unwrap();
+    let pronoun_analysis = semantic
+        .analyze_in_context("pronoun", "Dia makan ikan.")
+        .unwrap();
+    assert_eq!(
+        pronoun_analysis.context_resolutions[0].resolved_word_id,
+        Some(cat)
+    );
+    let resolved_query = semantic
+        .respond_in_context("pronoun", "Apakah kucing makan ikan?", 8)
+        .unwrap();
+    assert_eq!(
+        resolved_query.evidence_level,
+        SemanticAnswerEvidence::ContextStatement
+    );
+
+    let heldout_question = "Siapa yang makan ikan?";
+    let wh_baseline = semantic
+        .respond_in_context("wh-baseline", heldout_question, 8)
+        .unwrap();
+    let wh_holdout_baseline = usize::from(
+        wh_baseline.evidence_level == SemanticAnswerEvidence::ContextStatement
+            && wh_baseline.answer.contains("kucing"),
+    );
+    assert_eq!(wh_holdout_baseline, 0);
+    assert_eq!(
+        wh_baseline.evidence_level,
+        SemanticAnswerEvidence::Insufficient
+    );
+    semantic
+        .analyze_in_context("wh-question", "Kucing makan ikan.")
+        .unwrap();
+    let who = semantic
+        .respond_in_context("wh-question", heldout_question, 8)
+        .unwrap();
+    assert_eq!(who.intent, SemanticQuestionIntent::OpenQuestion);
+    assert_eq!(who.evidence_level, SemanticAnswerEvidence::ContextStatement);
+    assert!(who.answer.contains("kucing"));
+    assert!(!who.evidence_ids.is_empty());
+    let wh_holdout_after_context_learning = usize::from(
+        who.evidence_level == SemanticAnswerEvidence::ContextStatement
+            && who.answer.contains("kucing"),
+    );
+    assert_eq!(wh_holdout_after_context_learning, 1);
+    println!(
+        "natural wh holdout (question absent from stored statements): baseline={wh_holdout_baseline}/1, after semantic context input={wh_holdout_after_context_learning}/1"
+    );
+
+    semantic
+        .analyze_in_context("opposing", "Kucing makan ikan.")
+        .unwrap();
+    semantic
+        .analyze_in_context("opposing", "Kucing tidak makan ikan.")
+        .unwrap();
+    let conflict = semantic
+        .respond_in_context("opposing", "Apakah kucing makan ikan?", 1)
+        .unwrap();
+    assert_eq!(
+        conflict.evidence_level,
+        SemanticAnswerEvidence::ConflictingStatements
+    );
+    assert_eq!(conflict.supporting_statements.len(), 2);
+
+    drop(semantic);
+    cleanup(&path);
+}
+
+#[test]
 fn sinonim_berbukti_menginjeksikan_arus_ke_language_network_lif() {
     let path = memory_path();
     let lexicon = lexicon();
@@ -1105,7 +1449,12 @@ fn benchmark_polaritas_100_test_group_held_out_membandingkan_baseline_dan_feedba
                 0.001,
             )
             .expect("feedback train dipelajari secara incremental");
-        assert!(outcome.learning().is_some());
+        assert!(
+            outcome.learning().is_some(),
+            "feedback tidak diterima untuk sampel {:?}; gap={:?}",
+            sample.text,
+            outcome.gaps()
+        );
     }
     assert_eq!(learned.memory().len(), training.len());
     let test_gap = learned

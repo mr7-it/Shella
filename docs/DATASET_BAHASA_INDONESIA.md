@@ -20,13 +20,46 @@ lisensi yang sama kecuali sumber menyatakannya.
 | [IndoNLI](https://github.com/ir-nlp-csui/indonli) | Repository tersedia; tidak ada revisi data yang dipin | JSONL dan arsip terjemahan tersedia upstream | Tidak ditemukan lisensi dataset yang mencakup anotasi dan teks sumber | Ditolak oleh registry; tidak diunduh, tidak diparse, dan tidak digunakan untuk evaluasi. |
 | [IndoSum](https://github.com/kata-ai/indosum) | Dataset Google Drive `1OgYbPfXFAv3TbwP1Qcwt_CC9cVWSJaco`; changelog `2019-03-20`; SHA-256 `34e5c504f711dd8ec0e87dbf10eb1dbaefca86717194f95a14476afeb8810108` | `tar.gz` 96,037,108 byte; JSONL per fold/split; ukuran arsip terurai 404,039,680 byte | CC BY-SA 4.0, tercantum di `README.txt` yang ikut dalam arsip; setiap record mempertahankan `source` dan `source_url` | Arsip dan notice data asli dibundel. Loader memverifikasi hash, membaca satu JSONL split per panggilan, memvalidasi record, menyediakan oracle extractive berlabel, dan menghitung token-level ROUGE-1 untuk kandidat pemanggil. Tidak ada summarizer yang dilatih. |
 
-WordNet Bahasa pada URL yang diajukan tidak ditemukan tersedia saat diperiksa
-(404). Kamus Hunspell bukan salah satu dari sepuluh dataset permintaan ini;
-loader/provenance yang sudah ada tetap terpisah.
+WordNet Bahasa r24 dipin ke commit `fb201ec6155dc5c3a23d76673cfbb28630bc9a67`
+`open-language/wordnets`; file membership dan definisi cocok dengan Git blob
+SHA-1 upstream. README dan LICENSE asli menyatakan MIT, termasuk untuk data.
+Parser memvalidasi seluruh 663.888 baris membership dan 12.668 definisi pada revision ini.
+Impor hanya menerima baris bahasa Indonesia `I` berlabel mutu `Y` (hand checked
+dan good) atau `O` (automatic high quality/good), serta lema satu-token.
+Label `M`, `L`, dan `X`, bahasa lain, serta lema multi-kata tidak dimasukkan.
+Synset yang mengandung lema dengan beberapa synset terdaftar tidak menghasilkan
+relasi WordID; relasi sinonim hanya dibuat sebagai SourceAssertion untuk pasangan
+lema yang tidak ambigu dan berada pada synset yang sama. File WordNet asli,
+README, dan lisensi dibundel di `data/language/wordnet-bahasa/`. Suffix POS synset
+dipetakan ke UPOS hanya jika lema mempunyai tepat satu synset dan belum memiliki
+anotasi POS/morphology; lema polisemik tidak mendapat POS tebakan dari sumber ini.
+Pada tes revision ini, **4.589** entry mendapat POS hasil pemetaan tersebut saat
+import ke lexicon kosong.
+Pada snapshot ini terdapat 33.278 baris Indonesian, termasuk 32 berlabel Y dan
+13.901 berlabel O. Parser menolak 4.442 bentuk bukan satu-token dan 25 membership
+duplikat; 9.466 membership yang lolos membentuk 5.750 WordID unik. Membership
+sisanya memakai ulang WordID lema yang sama pada entry berbeda.
+Snapshot menghasilkan 7.326 synset satu-token. Audit graph pada aturan ambiguitas
+di atas memasukkan 934 relasi pasangan; 4.877 kandidat keanggotaan ambigu tidak
+dipromosikan; konflik dengan edge antonim yang ada juga dilewati. Jumlah tersebut
+adalah hitungan statis dari snapshot ini, bukan ukuran cakupan bahasa umum.
+Kamus Hunspell tetap jalur terpisah.
+
+Semua 12.668 baris definisi lolos validasi format parser, tetapi hanya gloss yang
+terikat ke lema satu-synset tanpa konflik yang dipasang ke `LinguisticMetadata`.
+Pada snapshot dan lexicon kosong test, **1.345** entry menerima definisi; sisanya
+tidak dipromosikan ke lema ambigu, synset konflik, atau entry yang sudah memiliki
+definisi. Query holdout `Apa arti heterotrof?` menghasilkan answer dari gloss
+`organisme yang tergantung pada zat organik kompleks untuk gizi` dan mengembalikan
+source entry ID, URI repository, atribusi, serta lisensi MIT di `SemanticResponse`.
+Tes integrasi juga menanyakan sinonim dari pasangan noun satu-token yang dipilih dari
+relasi WordNet r24 terimpor, lalu memeriksa ID relasi dan provenance MIT. POS dan
+graph tersebut dipakai saat inference; gloss/relasi tidak diubah menjadi bobot neural
+atau hasil training.
 
 ## Manifest integritas dan verifikasi
 
-`data/language-integrity.json` memuat entry untuk semua **59 file** di
+`data/language-integrity.json` memuat entry untuk semua **63 file** di
 `data/language/`: ukuran dalam byte, SHA-256, format, dan encoding. Arsip
 IndoSum ditandai binary gzip; seluruh CSV, JSON, CoNLL-U, README, dan notice
 lisensi harus UTF-8. `DatasetIntegrityManifest::verify_directory` menolak
@@ -52,7 +85,7 @@ Manifest tidak ditandatangani; ia mendeteksi perubahan tak terduga selama nilai
 manifest terjaga di version control, bukan serangan yang mengubah data dan
 manifest sekaligus.
 
-`LicenseRegistry::verified_sources()` hanya menyetujui stopwords-id, PUD,
+`LicenseRegistry::verified_sources()` menyetujui stopwords-id, PUD, WordNet Bahasa,
 NusaX, IndoSum, dan sumber Hunspell terdahulu. File sumber yang dibundel
 diverifikasi dengan ukuran, Git blob SHA-1, dan SHA-256 pinned; struktur skema
 kemudian divalidasi parser masing-masing. Batas pembacaan tetap diberlakukan.
@@ -92,8 +125,10 @@ Dataset yang sudah diparse dapat dibaca ulang dari sumber lokal; vocabulary PUD
 memiliki jalur serialisasi/checkpoint yang sudah ada, dan NusaX lexicon
 menyediakan JSON round-trip dengan validasi provenance. Evaluasi NusaX dan
 IndoSum hanya melaporkan metrik dari prediksi/teks kandidat yang diberikan
-pemanggil. Hasil tersebut tidak menunjukkan Shella telah belajar, dan tidak
-mengukur pemahaman atau reasoning umum.
+pemanggil. WordNet diimpor ke lexicon dan edge masuk ke graph SemanticMemory
+persisten yang sama melalui mekanisme yang telah ada. Kalimat tes bukan data belajar.
+Hasil tersebut tidak menunjukkan Shella telah belajar, dan tidak mengukur
+pemahaman atau reasoning umum.
 
 ## Batasan lisensi dan cakupan
 
@@ -104,4 +139,11 @@ mengukur pemahaman atau reasoning umum.
 - Loader IndoSum membaca arsip terverifikasi ke struktur satu split di memori;
   arsip 96 MB disimpan terkompresi dan tidak diekstrak permanen. Memuat split
   penuh membutuhkan memori sebanding ukuran JSONL split tersebut.
-- Tidak ada sumber yang digunakan untuk melatih model dalam perubahan ini.
+- Impor leksikal tidak menganggap terjemahan otomatis sebagai sinonim dan tidak
+  mengubah kalimat uji menjadi data belajar. Satu contoh kalimat Indonesia buatan
+  tes terpisah dari data WordNet. Impor ini tidak melatih bobot neural atau
+  membuktikan generalisasi bahasa luas.
+- Generator respons memakai template deterministik dan scope intent terbatas.
+  Retrieval konteks menyingkirkan pertanyaan, tetapi pernyataan konteks tetap
+  merupakan input percakapan, bukan fakta yang diverifikasi di dunia luar.
+  Kategori confidence ordinal bukan probabilitas terkalibrasi.

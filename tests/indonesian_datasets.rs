@@ -72,7 +72,13 @@ fn stopwords_loader_rejects_unpinned_json_and_unknown_sources() {
     assert!(DatasetLoader::load_stopwords_json(&path, &registry).is_err());
     cleanup(path);
 
-    assert!(registry.provenance(DatasetId::WordNetBahasa).is_err());
+    assert_eq!(
+        registry
+            .provenance(DatasetId::WordNetBahasa)
+            .expect("WordNet Bahasa lisensinya terverifikasi")
+            .license_id,
+        "MIT"
+    );
     assert!(registry.provenance(DatasetId::IndoNli).is_err());
 }
 

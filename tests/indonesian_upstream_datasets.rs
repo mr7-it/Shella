@@ -1,7 +1,7 @@
 use shella::{
     DatasetId, DatasetLoader, IndoSumPartition, IndonesianVocabulary, LanguageNetwork,
-    LexiconMetadata, LicenseRegistry, LifConfig, LifNetwork, NusaXSentimentLabel, NusaXSplit,
-    Vocabulary, tokenize,
+    LexicalRelationType, LexiconMetadata, LicenseRegistry, LifConfig, LifNetwork,
+    NusaXSentimentLabel, NusaXSplit, SemanticAnswerEvidence, SemanticMemory, Vocabulary, tokenize,
 };
 use std::{fs, path::PathBuf};
 
@@ -283,4 +283,203 @@ fn indosum_stream_loads_licensed_jsonl_and_measures_extractive_summaries() {
     assert!(
         DatasetLoader::load_indosum_archive(&path, 0, IndoSumPartition::Test, &registry,).is_err()
     );
+}
+
+#[test]
+fn wordnet_bahasa_imports_pinned_quality_members_and_synset_evidence_into_existing_graph() {
+    let registry = LicenseRegistry::verified_sources();
+    let mut lexicon = empty_lexicon();
+    let dataset = DatasetLoader::load_wordnet_bahasa(
+        data_path("wordnet-bahasa/wn-msa-all.tab"),
+        data_path("wordnet-bahasa/wn-ind-def.tab"),
+        &registry,
+    )
+    .expect("WordNet Bahasa pinned files validate");
+    assert_eq!(dataset.membership_rows, 663_888);
+    assert_eq!(dataset.indonesian_rows, 33_278);
+    assert_eq!(dataset.indonesian_quality_y_rows, 32);
+    assert_eq!(dataset.indonesian_quality_o_rows, 13_901);
+    assert_eq!(dataset.unique_synsets(), 7_326);
+
+    let report = DatasetLoader::import_wordnet_bahasa(&dataset, &mut lexicon, &registry)
+        .expect("WordNet Bahasa imports atomically into existing Indonesian lexicon");
+    assert_eq!(report.source_memberships, 9_466);
+    assert_eq!(report.imported_entries, 5_750);
+    assert_eq!(report.reused_entries, 3_716);
+    assert_eq!(report.validated_synset_relations, 934);
+    assert_eq!(report.skipped_ambiguous_relations, 4_877);
+    assert_eq!(report.skipped_conflicting_relations, 0);
+    assert!(report.imported_definitions > 0);
+    let wordnet_pos_entries = lexicon
+        .entries()
+        .iter()
+        .filter(|entry| {
+            entry.linguistic.part_of_speech.is_some()
+                && entry
+                    .sources
+                    .iter()
+                    .any(|source| source.source_entry_id.starts_with("synset:"))
+        })
+        .count();
+    assert!(wordnet_pos_entries > 0);
+    println!("WordNet POS mapped on {wordnet_pos_entries} unambiguous entries");
+    assert_eq!(lexicon.datasets().len(), 1);
+    assert_eq!(lexicon.datasets()[0].license_id, "MIT");
+    let animal = lexicon
+        .lookup("hewan")
+        .expect("lookup valid")
+        .expect("real Indonesian lemma");
+    assert!(animal.sources.iter().any(|source| {
+        source
+            .source_entry_id
+            .starts_with("synset:00015388-n:quality:O:")
+    }));
+    assert_eq!(animal.linguistic.part_of_speech.as_deref(), Some("NOUN"));
+
+    let before = (lexicon.entries().len(), lexicon.relations().len());
+    let repeated = DatasetLoader::import_wordnet_bahasa(&dataset, &mut lexicon, &registry)
+        .expect("re-import is idempotent");
+    assert_eq!((lexicon.entries().len(), lexicon.relations().len()), before);
+    assert_eq!(repeated.imported_entries, 0);
+
+    let memory_path = std::env::temp_dir().join(format!(
+        "shella-wordnet-semantic-{}.json",
+        std::process::id()
+    ));
+    let sentence = "Hewan itu hidup di kota."; // Ditulis khusus untuk pengujian; bukan contoh data belajar WordNet.
+    {
+        let mut memory = SemanticMemory::open(&memory_path, lexicon.clone())
+            .expect("lexical relations enter the existing SemanticMemory graph");
+        let (left, right, relation_id) = memory
+            .lexicon()
+            .relations()
+            .iter()
+            .filter(|relation| relation.relation_type == LexicalRelationType::Synonym)
+            .find_map(|relation| {
+                let left = memory.lexicon().by_word_id(relation.source_word?)?;
+                let right = memory.lexicon().by_word_id(relation.target_word)?;
+                let left_is_noun = left
+                    .linguistic
+                    .part_of_speech
+                    .as_deref()
+                    .is_some_and(|pos| matches!(pos, "NOUN" | "PROPN"));
+                let right_is_noun = right
+                    .linguistic
+                    .part_of_speech
+                    .as_deref()
+                    .is_some_and(|pos| matches!(pos, "NOUN" | "PROPN"));
+                (left_is_noun
+                    && right_is_noun
+                    && left.headword.split_whitespace().count() == 1
+                    && right.headword.split_whitespace().count() == 1)
+                    .then(|| {
+                        (
+                            left.headword.clone(),
+                            right.headword.clone(),
+                            relation.source_entry_id.clone(),
+                        )
+                    })
+            })
+            .expect("pinned WordNet has an unambiguous single-token noun synonym pair");
+        let synonym_query = format!("Apa sinonim antara {left} dan {right}?");
+        let synonym_answer = memory
+            .respond_in_context("wordnet-relation-holdout", &synonym_query, 4)
+            .expect("natural-language question uses imported synset graph");
+        assert_eq!(
+            synonym_answer.evidence_level,
+            SemanticAnswerEvidence::DirectSource
+        );
+        assert!(synonym_answer.evidence_ids.contains(&relation_id));
+        assert!(synonym_answer.answer.starts_with("Menurut WordNet Bahasa,"));
+        assert!(
+            synonym_answer
+                .source_provenance
+                .iter()
+                .any(|source| source.license == "MIT")
+        );
+
+        let analysis = memory
+            .analyze(sentence)
+            .expect("natural Indonesian test sentence analyzes");
+        assert_eq!(analysis.tokens[0].surface, "hewan");
+        assert!(analysis.tokens[0].known);
+        assert!(
+            analysis
+                .tokens
+                .iter()
+                .any(|token| token.surface == "kota" && token.known)
+        );
+        assert!(memory.relations().iter().any(|relation| {
+            relation.evidence.source
+                == registry
+                    .provenance(DatasetId::WordNetBahasa)
+                    .unwrap()
+                    .attribution
+                && relation.evidence.source_entry_id.starts_with("synset:")
+                && relation.evidence.status == shella::AssertionStatus::SourceAssertion
+        }));
+        let definition_member = dataset
+            .members()
+            .iter()
+            .find(|member| {
+                dataset
+                    .members()
+                    .iter()
+                    .filter(|other| other.lemma == member.lemma)
+                    .count()
+                    == 1
+                    && dataset.definition(&member.synset_id).is_some()
+                    && !dataset.has_definition_conflict(&member.synset_id)
+            })
+            .expect("real lemma with unique synset and Indonesian gloss");
+        let gloss = dataset.definition(&definition_member.synset_id).unwrap();
+        let query = format!("Apa arti {}?", definition_member.lemma);
+        let answer = memory
+            .respond_in_context("gloss-holdout", &query, 4)
+            .expect("natural Indonesian definition question");
+        assert_eq!(
+            answer.evidence_level,
+            shella::SemanticAnswerEvidence::DirectSource
+        );
+        assert!(answer.answer.contains(&gloss.text));
+        assert!(answer.answer.starts_with("Menurut WordNet Bahasa,"));
+        assert_eq!(answer.source_provenance.len(), 1);
+        assert_eq!(answer.source_provenance[0].license, "MIT");
+        assert!(
+            answer.source_provenance[0]
+                .source_uri
+                .contains("open-language/wordnets")
+        );
+        let definition_source_id = lexicon
+            .lookup(&definition_member.lemma)
+            .unwrap()
+            .unwrap()
+            .linguistic
+            .definition_source_entry_id
+            .as_ref()
+            .unwrap()
+            .clone();
+        assert!(answer.evidence_ids.contains(&definition_source_id));
+        assert!(answer.retrieved_context.is_empty());
+        println!(
+            "WordNet direct definitions imported={}, real holdout query={}, answer={}",
+            report.imported_definitions, query, answer.answer
+        );
+    }
+    {
+        let restored =
+            SemanticMemory::open(&memory_path, lexicon).expect("semantic memory restores");
+        assert!(!restored.relations().is_empty());
+        assert!(
+            restored
+                .analyze(sentence)
+                .expect("test sentence remains analyzable")
+                .tokens[0]
+                .known
+        );
+    }
+    fs::remove_file(&memory_path).expect("semantic store cleaned");
+    let mut lock = memory_path.as_os_str().to_os_string();
+    lock.push(".lock");
+    fs::remove_file(PathBuf::from(lock)).expect("semantic store lock cleaned");
 }
