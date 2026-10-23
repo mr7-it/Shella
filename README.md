@@ -53,6 +53,21 @@ cargo bench --bench system --locked
 cargo bench --bench language --locked
 ```
 
+## Antarmuka terminal `shella-lm`
+
+Perintah model generatif menyediakan header ringkas, spinner untuk tahap baca/evaluasi/checkpoint, dan progress bar training yang dihitung dari dokumen serta batch optimizer/validasi yang benar-benar selesai. Saat training, terminal menampilkan loss batch dan perkiraan ETA berdasarkan laju langkah yang sudah terukur; ETA bukan jaminan waktu selesai. Animasi hanya aktif saat stderr adalah terminal interaktif. `NO_COLOR` mematikan ANSI.
+
+```sh
+cargo run --locked --bin shella-lm -- help
+cargo run --locked --bin shella-lm -- train \
+  --dataset data/indonesian_coherent_corpus/prepared_corpus.json \
+  --checkpoint target/shella-id.sllm --epochs 1 --batch-size 64
+cargo run --locked --bin shella-lm -- generate \
+  --checkpoint target/shella-id.sllm --prompt "Apa itu neuron?"
+```
+
+Output otomatis berupa teks ringkas saat stdout terminal dan JSON saat stdout diarahkan atau di-pipe. Pilih secara eksplisit dengan `--format text` atau `--format json`; progress tetap ditulis ke stderr sehingga stdout JSON bersih. Teks hasil generate diberi label belum diverifikasi—UI tidak mengklaim fakta atau koherensi yang belum diukur.
+
 Dalam proyek Rust lain, tambahkan dependensi bernama `shella`, lalu impor API dari crate `shella`. Contoh integrasi ada di [Panduan API](docs/API.md) dan [SDK](docs/SDK.md). Dependency langsung dan transitif tercatat di `Cargo.toml` serta `Cargo.lock`.
 
 ## Peta dokumentasi

@@ -21,7 +21,10 @@ pub use generation::{
 };
 pub use model::{ComputeDevice, TransformerConfig};
 pub use tokenizer::{BOS_ID, CharacterTokenizer, EOS_ID, PAD_ID, UNK_ID};
-pub use training::{EpochMetrics, EvaluationMetrics, TrainingConfig, TrainingReport};
+pub use training::{
+    EpochMetrics, EvaluationMetrics, TrainingConfig, TrainingPhase, TrainingProgress,
+    TrainingReport,
+};
 
 use crate::{SimError, language::LicenseRegistry};
 use std::{fmt, path::Path};
@@ -185,6 +188,22 @@ impl GenerativeLanguageModel {
         config: TrainingConfig,
     ) -> Result<TrainingReport> {
         let report = training::train_model(self, corpus, config)?;
+        self.training_report = Some(report.clone());
+        Ok(report)
+    }
+
+    /// Trains while reporting actual document, optimizer-batch, and validation progress.
+    /// The callback is observational; it should be fast and must not panic.
+    pub fn train_with_progress<F>(
+        &mut self,
+        corpus: &CorpusSplit,
+        config: TrainingConfig,
+        progress: F,
+    ) -> Result<TrainingReport>
+    where
+        F: FnMut(TrainingProgress),
+    {
+        let report = training::train_model_with_progress(self, corpus, config, progress)?;
         self.training_report = Some(report.clone());
         Ok(report)
     }

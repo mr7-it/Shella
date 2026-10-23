@@ -124,6 +124,27 @@ pub struct EvaluationMetrics {
     pub perplexity: f64,
 }
 
+/// Tahap aktual yang sedang dikerjakan oleh trainer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrainingPhase {
+    PreparingData,
+    Optimizing,
+    Validating,
+}
+
+/// Snapshot progres; `completed/total` berarti dokumen atau batch sesuai tahap.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrainingProgress {
+    pub phase: TrainingPhase,
+    /// Nol saat persiapan data; bernomor mulai satu saat optimisasi/validasi.
+    pub epoch: usize,
+    pub total_epochs: usize,
+    pub completed: usize,
+    pub total: usize,
+    /// Loss batch saat optimisasi atau mean kumulatif validasi setelah suatu batch.
+    pub latest_loss: Option<f64>,
+}
+
 #[derive(Debug)]
 struct Window {
     input: Vec<u32>,
@@ -135,6 +156,18 @@ pub(crate) fn train_model(
     corpus: &CorpusSplit,
     config: TrainingConfig,
 ) -> Result<TrainingReport> {
+    train_model_with_progress(model, corpus, config, |_| {})
+}
+
+pub(crate) fn train_model_with_progress<F>(
+    model: &mut GenerativeLanguageModel,
+    corpus: &CorpusSplit,
+    config: TrainingConfig,
+    mut progress: F,
+) -> Result<TrainingReport>
+where
+    F: FnMut(TrainingProgress),
+{
     config.validate(model)?;
     corpus.validate_disjoint_ids()?;
     if model.corpus_manifest.as_ref() != Some(&corpus.manifest) {
@@ -150,10 +183,28 @@ pub(crate) fn train_model(
         });
     }
 
-    let windows = make_windows(
+    progress(TrainingProgress {
+        phase: TrainingPhase::PreparingData,
+        epoch: 0,
+        total_epochs: config.epochs,
+        completed: 0,
+        total: corpus.training.len(),
+        latest_loss: None,
+    });
+    let windows = make_windows_with_progress(
         &corpus.training,
         &model.tokenizer,
         model.config().max_context,
+        |completed, total| {
+            progress(TrainingProgress {
+                phase: TrainingPhase::PreparingData,
+                epoch: 0,
+                total_epochs: config.epochs,
+                completed,
+                total,
+                latest_loss: None,
+            });
+        },
     )?;
     if windows.is_empty() {
         return Err(GenerativeError::InvalidInput {
@@ -177,6 +228,15 @@ pub(crate) fn train_model(
     for epoch in 1..=config.epochs {
         let mut order = (0..windows.len()).collect::<Vec<_>>();
         deterministic_shuffle(&mut order, &mut shuffle_state);
+        let steps_per_epoch = windows.len().div_ceil(config.batch_size);
+        progress(TrainingProgress {
+            phase: TrainingPhase::Optimizing,
+            epoch,
+            total_epochs: config.epochs,
+            completed: 0,
+            total: steps_per_epoch,
+            latest_loss: None,
+        });
         let mut training_loss_sum = 0.0_f64;
         let mut training_tokens = 0usize;
         let mut gradient_norm_sum = 0.0_f64;
@@ -215,6 +275,14 @@ pub(crate) fn train_model(
                     .ok_or(GenerativeError::Numerical {
                         operation: "optimizer step counter",
                     })?;
+            progress(TrainingProgress {
+                phase: TrainingPhase::Optimizing,
+                epoch,
+                total_epochs: config.epochs,
+                completed: epoch_steps,
+                total: steps_per_epoch,
+                latest_loss: Some(loss_value),
+            });
         }
         if training_tokens == 0 || epoch_steps == 0 {
             return Err(GenerativeError::InvalidInput {
@@ -222,7 +290,29 @@ pub(crate) fn train_model(
                 reason: "epoch tidak menghasilkan token training atau langkah optimizer",
             });
         }
-        let validation = evaluate_model(model, &corpus.validation, config.batch_size)?;
+        progress(TrainingProgress {
+            phase: TrainingPhase::Validating,
+            epoch,
+            total_epochs: config.epochs,
+            completed: 0,
+            total: 0,
+            latest_loss: None,
+        });
+        let validation = evaluate_model_with_progress(
+            model,
+            &corpus.validation,
+            config.batch_size,
+            |completed, total, loss| {
+                progress(TrainingProgress {
+                    phase: TrainingPhase::Validating,
+                    epoch,
+                    total_epochs: config.epochs,
+                    completed,
+                    total,
+                    latest_loss: Some(loss),
+                });
+            },
+        )?;
         let training_loss = training_loss_sum / training_tokens as f64;
         epoch_metrics.push(EpochMetrics {
             epoch,
@@ -451,6 +541,18 @@ pub(crate) fn evaluate_model(
     records: &[CorpusRecord],
     batch_size: usize,
 ) -> Result<EvaluationMetrics> {
+    evaluate_model_with_progress(model, records, batch_size, |_, _, _| {})
+}
+
+pub(crate) fn evaluate_model_with_progress<F>(
+    model: &GenerativeLanguageModel,
+    records: &[CorpusRecord],
+    batch_size: usize,
+    mut on_batch: F,
+) -> Result<EvaluationMetrics>
+where
+    F: FnMut(usize, usize, f64),
+{
     if records.is_empty() {
         return Err(GenerativeError::InvalidInput {
             parameter: "evaluation_records",
@@ -473,7 +575,8 @@ pub(crate) fn evaluate_model(
     let mut weighted_loss = 0.0_f64;
     let mut token_count = 0usize;
     let mut window_count = 0usize;
-    for window_batch in windows.chunks(batch_size) {
+    let total_batches = windows.len().div_ceil(batch_size);
+    for (batch_index, window_batch) in windows.chunks(batch_size).enumerate() {
         let batch = make_batch(window_batch.iter(), &Device::Cpu)?;
         let logits = model.backend.forward(&batch.inputs)?;
         let (loss, valid_tokens) = masked_next_token_loss(&logits, &batch.targets)?;
@@ -486,6 +589,11 @@ pub(crate) fn evaluate_model(
         weighted_loss += loss_value * valid_tokens as f64;
         token_count += valid_tokens;
         window_count += window_batch.len();
+        on_batch(
+            batch_index + 1,
+            total_batches,
+            weighted_loss / token_count as f64,
+        );
     }
     if token_count == 0 {
         return Err(GenerativeError::InvalidInput {
@@ -508,24 +616,36 @@ fn make_windows(
     tokenizer: &CharacterTokenizer,
     max_context: usize,
 ) -> Result<Vec<Window>> {
+    make_windows_with_progress(records, tokenizer, max_context, |_, _| {})
+}
+
+fn make_windows_with_progress<F>(
+    records: &[CorpusRecord],
+    tokenizer: &CharacterTokenizer,
+    max_context: usize,
+    mut on_document: F,
+) -> Result<Vec<Window>>
+where
+    F: FnMut(usize, usize),
+{
     let mut windows = Vec::new();
-    for record in records {
+    for (record_index, record) in records.iter().enumerate() {
         let sequence = tokenizer.encode_document(&record.text)?;
-        if sequence.len() < 2 {
-            continue;
-        }
-        let mut start = 0usize;
-        while start + 1 < sequence.len() {
-            let end = (start + max_context + 1).min(sequence.len());
-            if end <= start + 1 {
-                break;
+        if sequence.len() >= 2 {
+            let mut start = 0usize;
+            while start + 1 < sequence.len() {
+                let end = (start + max_context + 1).min(sequence.len());
+                if end <= start + 1 {
+                    break;
+                }
+                windows.push(Window {
+                    input: sequence[start..end - 1].to_vec(),
+                    target: sequence[start + 1..end].to_vec(),
+                });
+                start += max_context;
             }
-            windows.push(Window {
-                input: sequence[start..end - 1].to_vec(),
-                target: sequence[start + 1..end].to_vec(),
-            });
-            start += max_context;
         }
+        on_document(record_index + 1, records.len());
     }
     Ok(windows)
 }
@@ -745,6 +865,57 @@ mod tests {
         assert!(report.epochs[0].validation_loss.is_finite());
         assert!(report.epochs[0].optimizer_steps > 0);
         assert!(report.epochs[0].mean_gradient_norm_before_clip.is_finite());
+    }
+
+    #[test]
+    fn progress_callback_reports_real_training_and_validation_work() {
+        let corpus = fixture_corpus();
+        let mut model = GenerativeLanguageModel::from_corpus(
+            TransformerConfig {
+                hidden_size: 8,
+                layer_count: 1,
+                head_count: 2,
+                max_context: 16,
+                seed: 92,
+                device: super::super::ComputeDevice::Cpu,
+            },
+            &corpus,
+        )
+        .unwrap();
+        let mut events = Vec::new();
+        let report = model
+            .train_with_progress(
+                &corpus,
+                TrainingConfig {
+                    epochs: 1,
+                    batch_size: 2,
+                    learning_rate: 0.01,
+                    ..Default::default()
+                },
+                |event| events.push(event),
+            )
+            .unwrap();
+
+        let preparation = events
+            .iter()
+            .rfind(|event| event.phase == TrainingPhase::PreparingData)
+            .unwrap();
+        assert_eq!(preparation.completed, corpus.training.len());
+        assert_eq!(preparation.total, corpus.training.len());
+        let optimizer = events
+            .iter()
+            .rfind(|event| event.phase == TrainingPhase::Optimizing)
+            .unwrap();
+        assert_eq!(optimizer.completed, report.epochs[0].optimizer_steps);
+        assert_eq!(optimizer.completed, optimizer.total);
+        assert!(optimizer.latest_loss.unwrap().is_finite());
+        let validation = events
+            .iter()
+            .rfind(|event| event.phase == TrainingPhase::Validating)
+            .unwrap();
+        assert!(validation.completed > 0);
+        assert_eq!(validation.completed, validation.total);
+        assert!(validation.latest_loss.unwrap().is_finite());
     }
 
     #[test]

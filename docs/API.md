@@ -453,6 +453,13 @@ cargo run --locked --bin shella-lm -- generate \
 cargo run --locked --bin shella-lm -- metrics --input-json target/hasil-generate.json
 ```
 
+Pada terminal interaktif, CLI memilih output ringkas dan menampilkan spinner tahap serta
+progress batch training; stdout yang diarahkan/di-pipe tetap JSON secara default. Gunakan
+`--format text` atau `--format json` untuk memilih secara eksplisit. Progress ditulis ke
+stderr agar JSON stdout aman untuk pipeline. API Rust `GenerativeLanguageModel::train_with_progress`
+mengirim `TrainingProgress` untuk persiapan dokumen, setiap optimizer batch, dan validasi;
+method `train` yang lama tetap tersedia tanpa callback.
+
 Training hanya memakai NusaX-Senti train resmi yang dibagi internal train/validation/test;
 validation dipakai selama training dan test dievaluasi setelah training selesai. `metrics`
 hanya mengukur pengulangan permukaan dari berkas hasil generasi dan tidak menilai

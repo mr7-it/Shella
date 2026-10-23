@@ -64,7 +64,8 @@ pub use language::generative::{
     FeedbackAuthorityCounts, GeneratedText, GenerationConfig, GenerationRepetitionMetrics,
     GenerationStrategy, GenerativeError, GenerativeLanguageModel, HybridAction,
     HybridActionPrediction, HybridLearningOutcome, HybridTrainingConfig, HybridTrainingReport,
-    SplitManifest, TrainingConfig, TrainingReport, TransformerConfig, VerifiedActionExample,
+    SplitManifest, TrainingConfig, TrainingPhase, TrainingProgress, TrainingReport,
+    TransformerConfig, VerifiedActionExample,
 };
 pub use language::{
     AssertionStatus, ConceptRelation, ContextResolution, DatasetEncoding, DatasetFileFormat,
